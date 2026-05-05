@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pkl
+*.joblib
+*.egg-info/
+*.egg
+.venv/
+venv/
+.env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data and outputs
+cmapps/
+cmapps_baseline/
+results/
+models/
+outputs/
+
+# Logs and temp
+*.log
+*.tmp
+.DS_Store
+
+# VS Code
+.vscode/
+
+# OS
+Thumbs.db

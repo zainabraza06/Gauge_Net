@@ -1,0 +1,11 @@
+{
+  "seed": 42,
+  "max_rul": 125,
+  "window_size": 30,
+  "batch_size": 128,
+  "epochs": 30,
+  "learning_rate": 0.001,
+  "patience": 5,
+  "val_ratio": 0.2,
+  "datasets": ["FD001", "FD002", "FD003", "FD004"]
+}
