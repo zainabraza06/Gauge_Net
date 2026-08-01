@@ -1,0 +1,159 @@
+"""
+Scores trained checkpoints and applies the ensembling suite. No training.
+
+    python -m ablation.evaluate
+    python -m ablation.evaluate --datasets FD003
+
+Discovers whichever <config>_seed*.pt files exist under OUT_ROOT/<dataset>,
+so a training run that was interrupted is reported on exactly as far as it
+actually got, rather than failing on an assumed seed list.
+
+Writes, per dataset:
+    loaded_component_ensembles_full.json   every metric, plus skip reasons
+    <dataset>_full_metrics_table.csv       one row per (config, technique)
+and a combined CSV across datasets at OUT_ROOT.
+"""
+
+import argparse
+import json
+import os
+
+import numpy as np
+
+from model.config import DEVICE, OUT_ROOT, DATASETS
+from model.data import load_subset
+from model.inference import discover_seeds, evaluate_checkpoint
+from model.metrics import ACC_THRESHOLDS
+
+from .configs import CONFIGS, config_by_name
+from .ensembling import build_stacking_features, run_ensembling_suite
+
+CSV_COLS = (['dataset', 'config', 'technique', 'n_members', 'n_params',
+             'nasa', 'rmse', 'mae', 'mean_error'] + [f'acc{k}' for k in ACC_THRESHOLDS])
+
+
+def write_csv(path, rows):
+    if not rows:
+        return False
+    with open(path, 'w') as f:
+        f.write(','.join(CSV_COLS) + '\n')
+        for row in rows:
+            f.write(','.join(str(row[c]) for c in CSV_COLS) + '\n')
+    return True
+
+
+def run_dataset(subset, configs):
+    print(f"\n{'#' * 75}\n# DATASET = {subset}\n{'#' * 75}")
+    out_dir = os.path.join(OUT_ROOT, subset)
+    if not os.path.isdir(out_dir):
+        print(f"  no checkpoint directory at {out_dir} -- skipping")
+        return None
+
+    fn, tr_c, te_c, rul_true, fml = load_subset(subset, cache_dir=out_dir)
+    print(f"  feature count: {len(fn)}")
+
+    all_ensembles = {}
+    csv_rows = []
+    for cfg in configs:
+        name = cfg['name']
+        seeds_found = discover_seeds(out_dir, name)
+        print(f"\n{'=' * 70}\nCONFIG = {name}  (found seeds: {seeds_found})\n{'=' * 70}")
+        if not seeds_found:
+            print(f"  no checkpoints found for {name} -- skipping this config")
+            continue
+
+        members = [evaluate_checkpoint(seed, fn, tr_c, te_c, rul_true, fml,
+                                       os.path.join(out_dir, f'{name}_seed{seed}.pt'),
+                                       cfg, tag=f'{subset}_{name}')
+                   for seed in seeds_found]
+
+        indiv_nasa = np.array([r['nasa'] for r in members])
+        indiv_ms = np.array([r['ms_per_engine'] for r in members])
+        print(f"  [{name}] individual: NASA mean={indiv_nasa.mean():.2f} "
+              f"std={indiv_nasa.std():.2f}  inference mean={indiv_ms.mean():.1f}ms/engine  "
+              f"(n={len(members)}, params={members[0]['n_params']:,})")
+
+        stack_data = (build_stacking_features(members, fn, tr_c, fml, cfg)
+                      if len(members) >= 2 else None)
+        ens, skips = run_ensembling_suite(members, rul_true, stack_data=stack_data)
+
+        all_ensembles[name] = dict(
+            n_members=len(members), seeds_found=seeds_found,
+            n_params=members[0]['n_params'],
+            indiv_nasa_mean=float(indiv_nasa.mean()), indiv_nasa_std=float(indiv_nasa.std()),
+            indiv_ms_per_engine_mean=float(indiv_ms.mean()),
+            ensembles=ens, skip_reasons=skips)
+
+        print(f"\n  [{name}] ensembling results:")
+        for technique, m in ens.items():
+            if m is None:
+                print(f"    {technique:<16}: SKIPPED ({skips.get(technique, 'unknown reason')})")
+                continue
+            acc_str = "  ".join(f"Acc{k}={m[f'acc{k}'] * 100:.1f}%" for k in ACC_THRESHOLDS)
+            print(f"    {technique:<16}: NASA={m['nasa']:>8.2f}  RMSE={m['rmse']:.3f}  "
+                  f"MAE={m['mae']:.3f}  MeanErr={m['mean_error']:+.3f}  {acc_str}")
+            csv_rows.append(dict(dataset=subset, config=name, technique=technique,
+                                 n_members=len(members), n_params=members[0]['n_params'],
+                                 **{k: m[k] for k in
+                                    ['nasa', 'rmse', 'mae', 'mean_error']},
+                                 **{f'acc{k}': m[f'acc{k}'] for k in ACC_THRESHOLDS}))
+
+    with open(os.path.join(out_dir, 'loaded_component_ensembles_full.json'), 'w') as f:
+        json.dump(all_ensembles, f, indent=2)
+    csv_path = os.path.join(out_dir, f'{subset}_full_metrics_table.csv')
+    if write_csv(csv_path, csv_rows):
+        print(f"\n  wrote metrics table: {csv_path}")
+
+    print(f"\n{'=' * 70}\n{subset} -- mean-ensemble NASA per config\n{'=' * 70}")
+    for cfg in configs:
+        name = cfg['name']
+        entry = all_ensembles.get(name)
+        if entry and entry['ensembles'].get('mean'):
+            print(f"  {name:<22}: n_members={entry['n_members']}  "
+                  f"mean_ensemble_NASA={entry['ensembles']['mean']['nasa']:.2f}")
+        else:
+            print(f"  {name:<22}: NOT FOUND")
+
+    return dict(dataset=subset, configs=all_ensembles, csv_rows=csv_rows)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
+    ap.add_argument('--datasets', nargs='+', default=DATASETS)
+    ap.add_argument('--configs', nargs='+', default=None)
+    args = ap.parse_args()
+    configs = [config_by_name(n) for n in args.configs] if args.configs else CONFIGS
+
+    print("=" * 75)
+    print("COMPONENT-BY-COMPONENT ABLATION -- load checkpoints + ensembling suite")
+    print(f"device={DEVICE}  datasets={args.datasets}")
+    print(f"configs={[c['name'] for c in configs]}")
+    print("=" * 75)
+
+    summaries = {}
+    all_rows = []
+    for subset in args.datasets:
+        s = run_dataset(subset, configs)
+        if s is not None:
+            summaries[subset] = s
+            all_rows.extend(s['csv_rows'])
+
+    combined = os.path.join(OUT_ROOT, 'all_datasets_full_metrics_table.csv')
+    if write_csv(combined, all_rows):
+        print(f"\nwrote combined metrics table: {combined}")
+
+    print(f"\n{'=' * 75}\nFINAL SUMMARY -- mean ensemble NASA\n{'=' * 75}")
+    for subset, s in summaries.items():
+        print(f"\n  {subset}:")
+        for cfg in configs:
+            entry = s['configs'].get(cfg['name'])
+            if entry and entry['ensembles'].get('mean'):
+                print(f"    {cfg['name']:<22}: {entry['ensembles']['mean']['nasa']:.2f}")
+            else:
+                print(f"    {cfg['name']:<22}: not found")
+    print("=" * 75)
+    return summaries
+
+
+if __name__ == '__main__':
+    main()
