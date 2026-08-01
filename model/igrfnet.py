@@ -89,7 +89,15 @@ class IGRFNet(nn.Module):
     def forward(self, x, lf, x_healthy=None, lf_healthy=None, healthy_gate=None):
         hm = self._encode(x, lf)
         feat_main = self.attn_pool(hm)
-        if self.use_healthy and x_healthy is not None:
+        if self.use_healthy and x_healthy is None:
+            # The head was sized for the healthy contrast, so falling back to
+            # the main features alone would fail deep inside nn.Linear with an
+            # opaque shape error. Say what is actually missing.
+            raise ValueError(
+                "this model was built with use_healthy=True, so forward() requires "
+                "x_healthy (and normally lf_healthy / healthy_gate); pass them, or "
+                "build the model with use_healthy=False")
+        if self.use_healthy:
             # The healthy window goes through the SAME encoder, so current and
             # healthy states are compared in one representation space.
             hm_h = self._encode(x_healthy, lf_healthy if lf_healthy is not None else lf)
