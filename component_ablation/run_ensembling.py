@@ -697,15 +697,6 @@ def run_ensembling_suite(members, rul_true):
         results[name] = all_metrics(preds, rul_true) if preds is not None else None
     return results
 
-    val_pred_pool = np.concatenate([r['val_pred'] for r in members])
-    val_true_pool = np.concatenate([r['val_true'] for r in members])
-    lr = LinearRegression().fit(val_pred_pool.reshape(-1, 1), val_true_pool - val_pred_pool)
-    a, b = float(lr.coef_[0]), float(lr.intercept_)
-    calibrated_preds = np.clip(mean_preds + (a * mean_preds + b), 0, None)
-    results['bias_corrected'] = (nasa_score(calibrated_preds, rul_true), rmse(calibrated_preds, rul_true))
-
-    return results
-
 
 def run_dataset(SS):
     print(f"\n{'#'*75}\n# DATASET = {SS}\n{'#'*75}")
