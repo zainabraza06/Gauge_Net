@@ -135,9 +135,8 @@ def build_val_snapshots(df_va, fn, fml, rng_seed, n_trunc=N_VAL_TRUNC):
     partway through. Validating on final windows only would score the model on
     a regime the test set never contains.
 
-    Called with a member's own training seed to reproduce exactly the
-    snapshots it early-stopped on, and with STACK_SEED to build the shared,
-    member-independent snapshot set that ridge stacking is fitted on.
+    Called with a member's own training seed, so the snapshots it early-stopped
+    on can be reproduced later from the seed alone.
     """
     vrng = np.random.default_rng(rng_seed + 777)
     windows, ruls, lfs, hwins, hlfs, hgates = [], [], [], [], [], []

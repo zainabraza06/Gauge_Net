@@ -88,24 +88,25 @@ cached in `geom_cache.pkl`, since computing them costs more than training.
 
 ## Ensembling
 
-The seeds of one config are combined nine ways: `mean`, `median`,
+The seeds of one config are combined eight ways: `mean`, `median`,
 `best_k_mean`, `val_weighted`, `softmax_sharp`, `softmax_soft`,
-`ridge_stacking`, `rank_average`, `bias_corrected`. A technique that cannot
-be fitted from the members found is skipped **with a recorded reason**, so a
-missing row in the results table is never ambiguous.
+`rank_average`, `bias_corrected`. A technique that cannot be computed from
+the members found is skipped **with a recorded reason**, so a missing row in
+the results table is never ambiguous.
 
-Two caveats worth carrying into any write-up:
+Two things worth carrying into any write-up:
 
 - **Validation-score weighting is only roughly comparable.** Each seed holds
   out different engines, so `best_val_nasa` carries split difficulty as well
   as model quality. It ranks members adequately; it is not a calibrated
   quality estimate.
-- **Ridge stacking needs common held-out engines.** It is fitted on a shared
-  snapshot set drawn from engines held out by *every* member, which keeps the
-  columns row-aligned and the fit leak-free. With five seeds at 20% held out
-  each, that intersection is usually empty and the technique reports itself
-  skipped — the honest outcome, and the reason the earlier version's numbers
-  for it should not be used.
+- **Ridge stacking is not offered.** Fitting per-member blend weights needs a
+  snapshot set every member can be scored on and none of them trained on —
+  the engines held out by *all* members. With five seeds holding out 20% each
+  that intersection is empty, so the technique cannot be fitted on this
+  design without either leaking a member's training data into its own weight
+  or misaligning the columns. Any `ridge_stacking` number from an earlier run
+  came from a misaligned fit and should not be reported.
 
 ## Metrics
 

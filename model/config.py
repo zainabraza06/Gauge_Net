@@ -59,15 +59,6 @@ SENSOR_GATE_DIM = 8; SENSOR_GATE_HEADS = 2
 ATTN_HEADS = 2
 NEAR_WINDOW = 8       # local attention span of the near path
 
-# ── ridge stacking ──
-# Stacking needs one snapshot set that EVERY member can be scored on and that
-# NO member trained on, i.e. the engines held out by all of them. STACK_SEED
-# draws those snapshots independently of any member's seed so the columns of
-# the design matrix stay row-aligned; below MIN_STACK_ENGINES there is too
-# little common held-out data to fit on and stacking is skipped.
-STACK_SEED = 12345
-MIN_STACK_ENGINES = 5
-
 DATASETS = ['FD001', 'FD003']
 
 # Preprocessed input produced by the preprocessing package, per subset.

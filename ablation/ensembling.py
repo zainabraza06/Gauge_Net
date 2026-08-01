@@ -4,7 +4,7 @@ Combining the seeds of one config into a single prediction.
 Each seed is an ensemble MEMBER. The techniques differ in what they use to
 combine members: nothing (mean, median), each member's validation score
 (best_k_mean, val_weighted, softmax_*), only the ordering members induce
-(rank_average), or a fitted combiner (ridge_stacking, bias_corrected).
+(rank_average), or a fitted recalibration (bias_corrected).
 
 A technique that cannot be fitted from the members found is skipped WITH A
 REASON rather than dropped silently, so a missing row in the results table is
@@ -14,69 +14,22 @@ On validation-score weighting: each member's val NASA comes from ITS OWN
 validation split, since every seed holds out different engines. The scores
 are comparable enough to rank members, but they carry split difficulty as
 well as model quality and should not be read as calibrated estimates.
+
+Ridge stacking is deliberately absent. Fitting per-member blend weights needs
+a snapshot set that every member can be scored on and that none of them
+trained on, i.e. the engines held out by ALL members. With five seeds holding
+out 20% each that intersection is empty in practice, so the technique could
+never be fitted on this design without either leaking a member's training
+data into its own weight or misaligning the columns.
 """
 
 import numpy as np
-import torch
-from sklearn.linear_model import LinearRegression, Ridge
+from sklearn.linear_model import LinearRegression
 
-from model.config import DEVICE, SCALE, MC_PASSES_TEST, STACK_SEED, MIN_STACK_ENGINES
-from model.igrfnet import build_model
-from model.inference import mc_predict
 from model.metrics import all_metrics
-from model.windows import build_val_snapshots
 
 
-def build_stacking_features(members, fn, tr_c, fml, cfg, device=DEVICE):
-    """Design matrix for ridge stacking.
-
-    Every member is scored on ONE shared snapshot set drawn from the engines
-    that appear in EVERY member's validation split. That gives two properties
-    the fit needs:
-
-      aligned    column i and the target vector describe the same engines at
-                 the same truncation points. Members cannot simply contribute
-                 their own val_pred: each seed draws a different validation
-                 split AND different truncation points within it, so those
-                 columns describe different engines. The row counts match
-                 regardless -- int(n_engines * VAL_FRAC) * N_VAL_TRUNC is the
-                 same for every seed -- so a shape check cannot detect it.
-      leak-free  no member trained on those engines, so the blend weights are
-                 not fitted on any member's training data.
-
-    Returns (X, y, None) on success, or (None, None, reason) when the members
-    hold out too few engines in common to fit on.
-    """
-    common = set(members[0]['val_units'])
-    for m in members[1:]:
-        common &= set(m['val_units'])
-    if len(common) < MIN_STACK_ENGINES:
-        return None, None, (f'only {len(common)} engine(s) held out by all '
-                            f'{len(members)} members, need >={MIN_STACK_ENGINES}')
-
-    df_st = tr_c[tr_c['unit'].isin(common)]
-    win, rul, lf, hwin, hlf, hgate = build_val_snapshots(df_st, fn, fml, STACK_SEED)
-    win, lf = win.to(device), lf.to(device)
-    hwin, hlf, hgate = hwin.to(device), hlf.to(device), hgate.to(device)
-
-    cols = []
-    for m in members:
-        model = build_model(len(fn), fml, cfg, device=device)
-        model.load_state_dict(torch.load(m['ckpt'], map_location=device))
-        model.eval()
-        with torch.no_grad():
-            cols.append(mc_predict(model, win, lf, x_healthy=hwin, lf_healthy=hlf,
-                                   healthy_gate=hgate, M=MC_PASSES_TEST).cpu().numpy() * SCALE)
-        del model
-        if device == 'cuda':
-            torch.cuda.empty_cache()
-
-    print(f"    stacking set: {len(common)} engines held out by all members "
-          f"-> {len(cols[0])} aligned snapshots")
-    return np.stack(cols, axis=1), rul.numpy(), None
-
-
-def run_ensembling_suite(members, rul_true, stack_data=None):
+def run_ensembling_suite(members, rul_true):
     """Returns (results, skip_reasons).
 
     results       {technique: full metric dict, or None if skipped}
@@ -113,18 +66,6 @@ def run_ensembling_suite(members, rul_true, stack_data=None):
         z = -val_nasas / tau
         sm_w = np.exp(z - z.max())
         combined[name] = (pred_matrix * (sm_w / sm_w.sum())[:, None]).sum(axis=0)
-
-    # ridge_stacking -- non-negative blend weights fitted on the shared,
-    # leak-free snapshot set from build_stacking_features.
-    if n_members < 2:
-        combined['ridge_stacking'] = None
-        skip_reasons['ridge_stacking'] = 'needs >=2 members'
-    elif stack_data is None or stack_data[0] is None:
-        combined['ridge_stacking'] = None
-        skip_reasons['ridge_stacking'] = stack_data[2] if stack_data else 'no stacking set supplied'
-    else:
-        ridge = Ridge(alpha=1.0, positive=True).fit(stack_data[0], stack_data[1])
-        combined['ridge_stacking'] = np.clip(ridge.predict(pred_matrix.T), 0, None)
 
     # rank_average -- each member ranks the ENGINES it scored, those ranks are
     # averaged across members, and the average rank is mapped back onto the

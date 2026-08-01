@@ -26,7 +26,7 @@ from model.inference import discover_seeds, evaluate_checkpoint
 from model.metrics import ACC_THRESHOLDS
 
 from .configs import CONFIGS, config_by_name
-from .ensembling import build_stacking_features, run_ensembling_suite
+from .ensembling import run_ensembling_suite
 
 CSV_COLS = (['dataset', 'config', 'technique', 'n_members', 'n_params',
              'nasa', 'rmse', 'mae', 'mean_error'] + [f'acc{k}' for k in ACC_THRESHOLDS])
@@ -73,9 +73,7 @@ def run_dataset(subset, configs):
               f"std={indiv_nasa.std():.2f}  inference mean={indiv_ms.mean():.1f}ms/engine  "
               f"(n={len(members)}, params={members[0]['n_params']:,})")
 
-        stack_data = (build_stacking_features(members, fn, tr_c, fml, cfg)
-                      if len(members) >= 2 else None)
-        ens, skips = run_ensembling_suite(members, rul_true, stack_data=stack_data)
+        ens, skips = run_ensembling_suite(members, rul_true)
 
         all_ensembles[name] = dict(
             n_members=len(members), seeds_found=seeds_found,
