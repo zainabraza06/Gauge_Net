@@ -671,16 +671,23 @@ def run_ensembling_suite(members, rul_true):
         sm_w = np.exp(z - z.max()); sm_w /= sm_w.sum()
         combined_preds[name] = (pred_matrix * sm_w[:, None]).sum(axis=0)
 
-    # rank_average -- FIXED formula (interpolate within each engine's OWN
-    # member predictions, never against a cross-engine pooled distribution)
-    if n_members >= 2:
-        ranks = np.argsort(np.argsort(pred_matrix, axis=0), axis=0).astype(np.float64)
+    # rank_average -- each member ranks the ENGINES it was asked to score,
+    # those ranks are averaged across members, and the averaged rank is
+    # mapped back onto a RUL scale. Ranking across engines (axis=1) is what
+    # makes this a distinct combiner: it uses only each member's ordering of
+    # the test set, so a member with a miscalibrated RUL scale but a correct
+    # ordering still contributes usefully.
+    #
+    # Ranking across MEMBERS (axis=0) instead is degenerate -- every engine's
+    # rank column is a permutation of 0..n_members-1, so the mean rank is the
+    # constant (n_members-1)/2 for every engine and the result is identically
+    # the median, whatever the predictions are.
+    if n_members >= 2 and pred_matrix.shape[1] >= 2:
+        n_items = pred_matrix.shape[1]
+        ranks = np.argsort(np.argsort(pred_matrix, axis=1), axis=1).astype(np.float64)
         mean_rank = ranks.mean(axis=0)
-        rank_preds = np.zeros(pred_matrix.shape[1])
-        for i in range(pred_matrix.shape[1]):
-            sorted_col = np.sort(pred_matrix[:, i])
-            rank_preds[i] = np.interp(mean_rank[i], np.arange(n_members), sorted_col)
-        combined_preds['rank_average'] = rank_preds
+        ref_scale = np.sort(pred_matrix.mean(axis=0))
+        combined_preds['rank_average'] = np.interp(mean_rank, np.arange(n_items), ref_scale)
     else:
         combined_preds['rank_average'] = None
 
