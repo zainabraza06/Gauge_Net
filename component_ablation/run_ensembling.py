@@ -15,11 +15,11 @@ this script:
      the seed (identical rng.choice call used during training), loads
      the checkpoint (built with the SAME config dict used to train it,
      so the architecture matches exactly), runs inference only.
-  3. Applies the full ensembling suite (mean, median, trimmed_mean,
-     val_weighted, ridge_stacking, softmax sharp/soft, rank_average
-     [bug-fixed], bias_corrected) to whatever members were found for
-     that config -- techniques requiring >=2 or >=3 members are
-     skipped gracefully if fewer completed.
+  3. Applies the full ensembling suite (mean, median, best_k_mean,
+     val_weighted, ridge_stacking, softmax sharp/soft, rank_average,
+     bias_corrected) to whatever members were found for that config --
+     techniques that cannot be fitted from the members found are skipped
+     with a recorded reason rather than silently dropped.
 
 Architecture matches the confirmed-final settings: SENSOR_GATE_DIM=8,
 SENSOR_GATE_HEADS=2, hard-window near-path (when active), absolute
@@ -40,7 +40,7 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR, SequentialLR
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import LinearRegression, Ridge
 from scipy.linalg import logm as _scipy_logm, sqrtm as _scipy_sqrtm
 
 warnings.filterwarnings('ignore')
@@ -59,6 +59,14 @@ USE_MULTIWINDOW = False; LAST_K = 9
 SENSOR_GATE_DIM = 8; SENSOR_GATE_HEADS = 2
 ATTN_HEADS = 2
 NEAR_WINDOW = 8
+
+# Ridge stacking needs one snapshot set that EVERY member can be scored on
+# and that NO member trained on -- i.e. the engines held out by all of them.
+# STACK_SEED draws those snapshots independently of any member's seed, so the
+# stacking features are aligned row-for-row. MIN_STACK_ENGINES is the smallest
+# intersection worth fitting a ridge on; below it, stacking is skipped.
+STACK_SEED = 12345
+MIN_STACK_ENGINES = 5
 
 SEEDS = [51, 52, 53, 54, 55]   # cosmetic only -- actual seeds used are auto-discovered per config via glob below
 DATASETS = ['FD001', 'FD003']
@@ -502,8 +510,12 @@ def collate(batch):
             torch.stack([b[4] for b in batch]), torch.stack([b[5] for b in batch]), torch.stack([b[6] for b in batch]))
 
 
-def build_val_snapshots(df_va, fn, fml, seed, n_trunc=N_VAL_TRUNC):
-    vrng = np.random.default_rng(seed + 777)
+def build_val_snapshots(df_va, fn, fml, rng_seed, n_trunc=N_VAL_TRUNC):
+    """Draws n_trunc random truncation points per engine. Called with a
+    member's own training seed to reproduce exactly the validation snapshots
+    that member early-stopped on, and with STACK_SEED to build the shared,
+    member-independent snapshot set used for ridge stacking."""
+    vrng = np.random.default_rng(rng_seed + 777)
     windows, ruls, lfs, hwins, hlfs, hgates = [], [], [], [], [], []
     for uid, g in df_va.groupby('unit', sort=False):
         g = g.sort_values('cycle').reset_index(drop=True)
@@ -548,21 +560,35 @@ def predict_engine_lastK(model, feats, cycles, fml, device, M=MC_PASSES_TEST, k=
     return float((preds * ramp).sum())
 
 
+def build_model(fn, fml, cfg):
+    """Builds the architecture described by one config dict -- the single
+    place that maps a config onto a model, so checkpoint loading and the
+    stacking pass cannot drift apart."""
+    return IGRFNet_Ablation(len(fn), fml, h_dim=H,
+                            use_sensor_gate=cfg['use_sensor_gate'], path_mode=cfg['path_mode'],
+                            use_reverse=cfg['use_reverse'], use_spectral=cfg['use_spectral'],
+                            use_healthy=cfg['use_healthy']).to(DEVICE)
+
+
+def val_engines_for_seed(tr_c, seed):
+    """Reproduces the validation split a given seed trained with -- the same
+    rng.choice call the training script made, so the engines a member never
+    saw can be identified after the fact."""
+    rng = np.random.default_rng(seed)
+    all_eng = sorted(tr_c['unit'].unique())
+    n_val = max(1, int(len(all_eng) * VAL_FRAC))
+    return set(int(u) for u in rng.choice(all_eng, n_val, replace=False))
+
+
 def load_and_evaluate_checkpoint(seed, fn, tr_c, te_c, rul_true, fml, ckpt, cfg, tag=''):
     """NO TRAINING -- loads an already-trained checkpoint (built with the
     exact same config dict used during training) and runs inference only.
     The validation split is reconstructed deterministically from the seed
     (identical rng.choice call used during training)."""
-    rng = np.random.default_rng(seed)
-    all_eng = sorted(tr_c['unit'].unique())
-    n_val = max(1, int(len(all_eng) * VAL_FRAC))
-    val_eng = set(int(u) for u in rng.choice(all_eng, n_val, replace=False))
+    val_eng = val_engines_for_seed(tr_c, seed)
     df_va = tr_c[tr_c['unit'].isin(val_eng)]
 
-    model = IGRFNet_Ablation(len(fn), fml, h_dim=H,
-                              use_sensor_gate=cfg['use_sensor_gate'], path_mode=cfg['path_mode'],
-                              use_reverse=cfg['use_reverse'], use_spectral=cfg['use_spectral'],
-                              use_healthy=cfg['use_healthy']).to(DEVICE)
+    model = build_model(fn, fml, cfg)
     if not os.path.exists(ckpt):
         raise FileNotFoundError(f"Expected checkpoint at {ckpt}")
     model.load_state_dict(torch.load(ckpt, map_location=DEVICE))
@@ -606,6 +632,7 @@ def load_and_evaluate_checkpoint(seed, fn, tr_c, te_c, rul_true, fml, ckpt, cfg,
           f"val_NASA={best_vn:.2f}  inference={ms_per_engine:.1f}ms/engine  ({n_test_engines} engines)")
     torch.cuda.empty_cache()
     result = dict(seed=seed, preds=preds, val_pred=val_p, val_true=val_true_np,
+                  val_units=sorted(val_eng), ckpt=ckpt,
                   nasa=ns, rmse=rm, mae=ma, mean_error=me,
                   best_val_nasa=best_vn, n_params=npar,
                   ms_per_engine=ms_per_engine, n_test_engines=n_test_engines)
@@ -631,40 +658,100 @@ def discover_seeds(ckpt_dir, config_name):
     return seeds
 
 
-def run_ensembling_suite(members, rul_true):
-    """Returns {technique_name: full_metrics_dict_or_None} -- every
-    technique's combined prediction array gets the FULL metric set
-    (nasa, rmse, mae, mean_error, acc5/10/13/15/20), not just NASA/RMSE."""
+def build_stacking_features(members, fn, tr_c, fml, cfg):
+    """Builds the design matrix for ridge stacking.
+
+    Every member is scored on ONE shared snapshot set drawn from the engines
+    that appear in EVERY member's validation split, so (a) column i and the
+    target vector describe the same engines at the same truncation points,
+    and (b) no member ever trained on those engines, so the fitted blend
+    weights are not fitted on any member's training data.
+
+    Returns (X, y, None) on success or (None, None, reason) when the members
+    hold out too few engines in common to fit on.
+    """
+    common = set(members[0]['val_units'])
+    for m in members[1:]:
+        common &= set(m['val_units'])
+    if len(common) < MIN_STACK_ENGINES:
+        return None, None, (f'only {len(common)} engine(s) held out by all '
+                            f'{len(members)} members, need >={MIN_STACK_ENGINES}')
+
+    df_st = tr_c[tr_c['unit'].isin(common)]
+    win, rul, lf, hwin, hlf, hgate = build_val_snapshots(df_st, fn, fml, STACK_SEED)
+    win, lf = win.to(DEVICE), lf.to(DEVICE)
+    hwin, hlf, hgate = hwin.to(DEVICE), hlf.to(DEVICE), hgate.to(DEVICE)
+
+    cols = []
+    for m in members:
+        model = build_model(fn, fml, cfg)
+        model.load_state_dict(torch.load(m['ckpt'], map_location=DEVICE))
+        model.eval()
+        with torch.no_grad():
+            p = mc_predict(model, win, lf, x_healthy=hwin, lf_healthy=hlf,
+                           healthy_gate=hgate, M=MC_PASSES_TEST).cpu().numpy() * SCALE
+        cols.append(p)
+        del model
+        torch.cuda.empty_cache()
+
+    print(f"    stacking set: {len(common)} engines held out by all members "
+          f"-> {len(cols[0])} aligned snapshots")
+    return np.stack(cols, axis=1), rul.numpy(), None
+
+
+def run_ensembling_suite(members, rul_true, stack_data=None):
+    """Returns (results, skip_reasons):
+      results      -- {technique_name: full metric dict, or None if skipped}
+      skip_reasons -- {technique_name: why it was skipped}
+    Every technique's combined prediction array gets the FULL metric set
+    (nasa, rmse, mae, mean_error, acc5/10/13/15/20), not just NASA/RMSE.
+
+    NOTE on the val-NASA-weighted techniques (best_k_mean, val_weighted,
+    softmax_*): each member's val NASA comes from ITS OWN validation split,
+    so the scores reflect split difficulty as well as model quality. They are
+    comparable enough to rank members, but should not be read as calibrated
+    quality estimates."""
     n_members = len(members)
     pred_matrix = np.stack([r['preds'] for r in members], axis=0)
     val_nasas = np.array([r['best_val_nasa'] for r in members])
     combined_preds = {}   # technique_name -> combined prediction array (or None if skipped)
+    skip_reasons = {}     # technique_name -> reason string
 
     combined_preds['mean'] = pred_matrix.mean(axis=0)
     combined_preds['median'] = np.median(pred_matrix, axis=0)
 
+    # best_k_mean -- mean of the members with the best val NASA, dropping the
+    # worst ~20%. Not a symmetric trimmed mean: nothing is trimmed off the
+    # good end, so the name says which members survive.
     n_drop = max(1, int(n_members * 0.2)) if n_members >= 3 else 0
     if n_drop > 0:
         keep_idx = np.argsort(val_nasas)[:n_members - n_drop]
-        combined_preds['trimmed_mean'] = pred_matrix[keep_idx].mean(axis=0)
+        combined_preds['best_k_mean'] = pred_matrix[keep_idx].mean(axis=0)
     else:
-        combined_preds['trimmed_mean'] = None
+        combined_preds['best_k_mean'] = None
+        skip_reasons['best_k_mean'] = 'needs >=3 members to drop one'
 
     inv_weights = 1.0 / np.maximum(val_nasas, 1e-6); inv_weights /= inv_weights.sum()
     combined_preds['val_weighted'] = (pred_matrix * inv_weights[:, None]).sum(axis=0)
 
-    if n_members >= 2:
-        val_pred_lens = [len(r['val_pred']) for r in members]
-        if len(set(val_pred_lens)) == 1:
-            from sklearn.linear_model import Ridge
-            X_val = np.stack([r['val_pred'] for r in members], axis=1)
-            y_val = members[0]['val_true']
-            ridge = Ridge(alpha=1.0, positive=True).fit(X_val, y_val)
-            combined_preds['ridge_stacking'] = np.clip(ridge.predict(pred_matrix.T), 0, None)
-        else:
-            combined_preds['ridge_stacking'] = None
-    else:
+    # ridge_stacking -- fits blend weights on the shared, member-independent
+    # snapshot set built by build_stacking_features. Each member's OWN
+    # val_pred cannot be used here: every seed draws a different validation
+    # split AND different truncation points within it, so stacking those
+    # columns would regress one member's predictions against another
+    # member's engines. The row counts happen to match regardless
+    # (n_val engines x N_VAL_TRUNC is the same for every seed), so a length
+    # check cannot detect the misalignment.
+    if n_members < 2:
         combined_preds['ridge_stacking'] = None
+        skip_reasons['ridge_stacking'] = 'needs >=2 members'
+    elif stack_data is None or stack_data[0] is None:
+        combined_preds['ridge_stacking'] = None
+        skip_reasons['ridge_stacking'] = (stack_data[2] if stack_data else 'no stacking set supplied')
+    else:
+        X_val, y_val = stack_data[0], stack_data[1]
+        ridge = Ridge(alpha=1.0, positive=True).fit(X_val, y_val)
+        combined_preds['ridge_stacking'] = np.clip(ridge.predict(pred_matrix.T), 0, None)
 
     for tau, name in [(50.0, 'softmax_sharp'), (150.0, 'softmax_soft')]:
         z = -val_nasas / tau
@@ -690,7 +777,12 @@ def run_ensembling_suite(members, rul_true):
         combined_preds['rank_average'] = np.interp(mean_rank, np.arange(n_items), ref_scale)
     else:
         combined_preds['rank_average'] = None
+        skip_reasons['rank_average'] = 'needs >=2 members and >=2 engines'
 
+    # bias_corrected -- a single global affine recalibration of the mean
+    # ensemble. Pooling members' validation predictions IS valid here: each
+    # (val_pred, val_true) pair is internally aligned, and only the pooled
+    # error-versus-prediction trend is fitted, not a per-member weight.
     mean_preds = combined_preds['mean']
     val_pred_pool = np.concatenate([r['val_pred'] for r in members])
     val_true_pool = np.concatenate([r['val_true'] for r in members])
@@ -702,7 +794,7 @@ def run_ensembling_suite(members, rul_true):
     results = {}
     for name, preds in combined_preds.items():
         results[name] = all_metrics(preds, rul_true) if preds is not None else None
-    return results
+    return results, skip_reasons
 
 
 def run_dataset(SS):
@@ -748,17 +840,18 @@ def run_dataset(SS):
         print(f"  [{name}] individual: NASA mean={indiv_nasa.mean():.2f} std={indiv_nasa.std():.2f}  "
               f"inference mean={indiv_ms.mean():.1f}ms/engine  (n={len(members)}, params={members[0]['n_params']:,})")
 
-        ens = run_ensembling_suite(members, rul_true)
+        stack_data = build_stacking_features(members, fn, tr_c, fml, cfg) if len(members) >= 2 else None
+        ens, skips = run_ensembling_suite(members, rul_true, stack_data=stack_data)
         all_ensembles[name] = dict(
             n_members=len(members), seeds_found=seeds_found, n_params=members[0]['n_params'],
             indiv_nasa_mean=float(indiv_nasa.mean()), indiv_nasa_std=float(indiv_nasa.std()),
             indiv_ms_per_engine_mean=float(indiv_ms.mean()),
-            ensembles=ens)
+            ensembles=ens, skip_reasons=skips)
 
         print(f"\n  [{name}] ensembling results (full metric set):")
         for technique, m in ens.items():
             if m is None:
-                print(f"    {technique:<18}: SKIPPED")
+                print(f"    {technique:<18}: SKIPPED ({skips.get(technique, 'unknown reason')})")
                 continue
             acc_str = "  ".join(f"Acc{k}={m[f'acc{k}']*100:.1f}%" for k in ACC_THRESHOLDS)
             print(f"    {technique:<18}: NASA={m['nasa']:>8.2f}  RMSE={m['rmse']:.3f}  MAE={m['mae']:.3f}  "
