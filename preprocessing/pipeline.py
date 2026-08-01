@@ -9,8 +9,8 @@ Both subsets have a SINGLE operating condition, so neither needs the regime
 clustering FD002/FD004 require, and both use the same 14 literature-confirmed
 sensors. FD003 has two fault modes against FD001's one, but no fault-mode
 label is used anywhere: the model is expected to infer the mode from the
-trajectory. That leaves one genuine difference, the output version tag, and
-it is a naming convention rather than a change in method.
+trajectory. The methods are therefore identical; see EMIT_PHASE for the one
+behavioural difference that is carried over deliberately.
 
 Three properties this pipeline guarantees:
 
@@ -60,6 +60,23 @@ GAMMA = 2.0
 
 VERSION = {'FD001': 'v1', 'FD003': 'v4'}
 
+# Whether to emit onset / T_i / phase.
+#
+# This is the ONE place the two subsets genuinely differ, and it is a
+# historical difference rather than a methodological one: the FD001 pipeline
+# emitted these columns, the FD003 v4 pipeline did not. It matters, because
+# the ablation trainer's phase weight falls back to onset=0, T_i=engine
+# length, phase=1 when they are missing -- which weights the whole trajectory
+# on a ramp rather than only the post-onset degradation phase. So FD001 and
+# FD003 checkpoints were trained under DIFFERENT loss weightings.
+#
+# The defaults reproduce what each pipeline actually produced, so regenerating
+# a pickle stays consistent with the checkpoints already trained against it.
+# Pass --emit-phase / --no-emit-phase to override, but note that flipping
+# FD003 to True changes its training objective and its results are then not
+# comparable with the existing FD003 checkpoints.
+EMIT_PHASE = {'FD001': True, 'FD003': False}
+
 
 def read_raw(data_dir, name):
     return pd.read_csv(os.path.join(data_dir, name), sep=r'\s+', header=None, names=COLS)
@@ -107,7 +124,8 @@ def smooth_weight(rul_capped, rul_cap=RUL_CAP, w_max=W_MAX, gamma=GAMMA):
     return 1.0 + w_max * (frac ** gamma)
 
 
-def build(subset, data_dir, output_dir):
+def build(subset, data_dir, output_dir, emit_phase=None):
+    emit_phase = EMIT_PHASE.get(subset, True) if emit_phase is None else emit_phase
     print("=" * 70)
     print(f"{subset} PREPROCESSING -- causal, leak-free")
     print(f"RUL_CAP={RUL_CAP}  BASELINE_WINDOW={BASELINE_WINDOW}  sensors={len(SELECTED)}")
@@ -169,15 +187,20 @@ def build(subset, data_dir, output_dir):
     # Degradation onset: the cycle from which the uncapped RUL would fall
     # below the cap, i.e. where the label stops being flat and starts
     # decreasing. phase marks rows at or after it.
-    T_i = train_feat.groupby('unit')['cycle'].transform('max').astype(np.float32)
-    train_feat['T_i'] = T_i.values.astype(np.float32)
-    train_feat['onset'] = np.maximum(0.0, T_i.values - RUL_CAP).astype(np.float32)
-    train_feat['phase'] = (train_feat['cycle'].values >= train_feat['onset'].values).astype(np.float32)
+    if emit_phase:
+        T_i = train_feat.groupby('unit')['cycle'].transform('max').astype(np.float32)
+        train_feat['T_i'] = T_i.values.astype(np.float32)
+        train_feat['onset'] = np.maximum(0.0, T_i.values - RUL_CAP).astype(np.float32)
+        train_feat['phase'] = (train_feat['cycle'].values >= train_feat['onset'].values).astype(np.float32)
+    print(f"  onset/T_i/phase columns emitted: {emit_phase}"
+          f"{'' if emit_phase else '  (trainer falls back to onset=0, T_i=len, phase=1)'}")
 
     output = {
         'trajectory_feature_names': {subset: SELECTED},
         'baseline_feature_names': {subset: base_cols},
         'feature_data': {subset: {'train': train_feat, 'test': test_feat}},
+        'weighting_config': {'w_max': W_MAX, 'gamma': GAMMA, 'rul_cap': RUL_CAP},
+        'asymmetric_loss_config': {'h1': 13.0, 'h2': 10.0},
         'normalization_stats': {subset: {
             'trajectory_mu': mu_g, 'trajectory_sig': sig_g,
             'baseline_mu': base_mu, 'baseline_sig': base_sig,
@@ -224,12 +247,21 @@ def verify(train_feat, test_feat, all_feat_cols, single_condition):
         if not (exact and no_future):
             issues.append(f'{name} baseline causality violated')
 
-    # sample_weight must be non-increasing in RUL across the whole range.
+    # sample_weight: check the FUNCTION's mathematical property over the whole
+    # range, not just that the realised column happens to come out sorted.
     probe = smooth_weight(np.linspace(0, RUL_CAP, 500))
     monotonic = bool(np.all(np.diff(probe) <= 1e-12))
     print(f"  sample_weight non-increasing in rul: {monotonic}  {'OK' if monotonic else 'FAIL'}")
     if not monotonic:
         issues.append('sample_weight not monotonic')
+
+    wmin = float(train_feat['sample_weight'].min())
+    wmax = float(train_feat['sample_weight'].max())
+    w_ok = bool(np.isclose(wmin, 1.0, atol=0.05) and np.isclose(wmax, 1 + W_MAX, atol=0.05))
+    print(f"  sample_weight range: [{wmin:.2f}, {wmax:.2f}] "
+          f"expected [1.00, {1 + W_MAX:.2f}]  {'OK' if w_ok else 'FAIL'}")
+    if not w_ok:
+        issues.append('sample_weight range off expected bounds')
 
     if not single_condition:
         issues.append('operating conditions vary; regime normalisation was skipped')
