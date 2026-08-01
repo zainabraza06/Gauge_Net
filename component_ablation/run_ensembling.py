@@ -103,26 +103,6 @@ def mae(pred, target):
     return float(np.mean(np.abs(np.array(pred) - np.array(target))))
 
 def mean_error(pred, target):
-    return float(np.mean(np.array(pred) - np.array(target)))
-
-def accuracy_within(pred, target, threshold):
-    e = np.abs(np.array(pred) - np.array(target))
-    return float(np.mean(e <= threshold))
-
-ACC_THRESHOLDS = [5, 10, 13, 15, 20]
-
-def all_metrics(pred, target):
-    """Computes every metric this run reports, for one prediction array."""
-    m = dict(nasa=nasa_score(pred, target), rmse=rmse(pred, target),
-              mae=mae(pred, target), mean_error=mean_error(pred, target))
-    for k in ACC_THRESHOLDS:
-        m[f'acc{k}'] = accuracy_within(pred, target, k)
-    return m
-
-def mae(pred, target):
-    return float(np.mean(np.abs(np.array(pred) - np.array(target))))
-
-def mean_error(pred, target):
     """Signed mean error -- positive means the model over-predicts RUL
     on average (the more dangerous direction), negative means it under-
     predicts. Worth reporting alongside MAE since MAE alone hides
@@ -135,6 +115,16 @@ def accuracy_within(pred, target, threshold):
     alongside RMSE/NASA score (e.g. Accuracy(+/-10), Accuracy(+/-20))."""
     e = np.abs(np.array(pred) - np.array(target))
     return float(np.mean(e <= threshold))
+
+ACC_THRESHOLDS = [5, 10, 13, 15, 20]
+
+def all_metrics(pred, target):
+    """Computes every metric this run reports, for one prediction array."""
+    m = dict(nasa=nasa_score(pred, target), rmse=rmse(pred, target),
+              mae=mae(pred, target), mean_error=mean_error(pred, target))
+    for k in ACC_THRESHOLDS:
+        m[f'acc{k}'] = accuracy_within(pred, target, k)
+    return m
 
 def asym_huber(pred, target):
     e = pred - target; ae = e.abs()
