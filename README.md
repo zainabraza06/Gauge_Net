@@ -47,8 +47,8 @@ so that `$CMAPPS_DATA_ROOT` contains `train_FD001.txt`, `test_FD001.txt`,
 export CMAPPS_DATA_ROOT=/path/to/cmapps        # raw txt + pipeline_output/
 export CMAPPS_OUT_ROOT=/path/to/checkpoints    # default: $CMAPPS_DATA_ROOT/component_ablation
 
-python -m preprocessing FD001
-python -m preprocessing FD003
+python -m preprocessing FD001        # -> output_FD001_v2.pkl
+python -m preprocessing FD003        # -> output_FD003_v5.pkl
 
 python -m ablation.train                        # full ladder, all seeds
 python -m ablation.train --datasets FD001 --configs 6_plus_healthy_FINAL --seeds 51
@@ -65,17 +65,38 @@ as far as it got.
 Each rung adds **one** component to the rung above, so any two adjacent rows
 differ by that component alone.
 
-| Rung | Adds | Params (32 features) |
+| Rung | Adds | Params (18 features) |
 |---|---|---|
-| `1_backbone_only` | single full-causal transformer path | 310,562 |
-| `2_plus_sensor_gate` | cross-sensor input gating | 311,147 |
-| `3c_near_far_both` | dual near/far paths + content-conditioned mixing gate | 572,969 |
-| `4_plus_reverse` | time-reversed encoding, learned blend | 722,538 |
-| `5_plus_spectral` | frequency-content gating | 735,210 |
-| `6_plus_healthy_FINAL` | healthy-window contrast | 781,866 |
+| `1_backbone_only` | single full-causal transformer path | 309,218 |
+| `2_plus_sensor_gate` | cross-sensor input gating | 309,691 |
+| `3c_near_far_both` | dual near/far paths + content-conditioned mixing gate | 571,513 |
+| `4_plus_reverse` | time-reversed encoding, learned blend | 721,082 |
+| `5_plus_spectral` | frequency-content gating | 732,410 |
+| `6_plus_healthy_FINAL` | healthy-window contrast | 779,066 |
 
 A rung's name is its checkpoint filename prefix (`<name>_seed<seed>.pt`), so
 renaming one orphans its checkpoints.
+
+## Features and weighting
+
+**18 features**: 14 raw sensors + 4 geometry columns. The 14 causal
+expanding-baseline columns were ablated against a no-baseline control and made
+TEST_NASA worse on both subsets, most likely because they are redundant with
+the healthy-window cross-attention, which already performs a learned
+per-engine offset comparison. `baseline_feature_names` is emitted as an empty
+list so loaders keep working.
+
+**One weighting function for every subset.** The sample weight is
+`1 + 3*(1 - RUL/125)^2`: exactly 1.0 at or above the cap, 4.0 at failure,
+smooth throughout. It depends on capped RUL alone, so no dataset-specific
+column can make two subsets train on different objectives. That is what
+previously happened: FD001 emitted `onset`/`T_i`/`phase` and FD003 did not, and
+the dataset silently substituted `onset=0, phase=1`, ramping FD003's weight
+across the whole trajectory instead of only the degradation window.
+
+Results go to `component_ablation_v2/`. Checkpoints under the older
+`component_ablation/` are **not** comparable: different loss, different
+feature count.
 
 ## Geometry features
 
