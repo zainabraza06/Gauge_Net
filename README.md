@@ -13,13 +13,13 @@ the training split only.
 
 ```
 preprocessing/     raw C-MAPSS text  ->  leak-free feature pickle
-  pipeline.py        z-score, causal expanding baseline, RUL cap, onset/phase
+  pipeline.py        z-score, RUL cap, unified sample weighting
   __main__.py        python -m preprocessing FD001
 
 model/             everything shared by training and evaluation
   config.py          hyperparameters and paths (env-overridable)
   metrics.py         NASA score, RMSE, MAE, mean error, Accuracy(±k)
-  losses.py          asymmetric Huber + degradation-phase weighting
+  losses.py          asymmetric Huber + RUL-only sample weighting
   geometry.py        Riemannian / Wasserstein drift features (cached)
   windows.py         causal windowing, dataset, validation snapshots
   modules.py         sensor gate, spectral gate, temporal blocks, pooling
@@ -27,33 +27,69 @@ model/             everything shared by training and evaluation
   data.py            load a subset and attach geometry features
   inference.py       MC-dropout prediction, per-engine scoring, checkpoints
 
+tests/
+  smoke_test.py      end-to-end run on synthetic data, no NASA archive needed
+
 ablation/          the study itself
   configs.py         the six-rung cumulative ladder
   train.py           python -m ablation.train
-  ensembling.py      nine ways of combining a config's seeds
+  ensembling.py      eight ways of combining a config's seeds
   evaluate.py        python -m ablation.evaluate
 ```
 
-## Data
-
-Download **CMAPSSData** from the
-[NASA Prognostics Data Repository](https://www.nasa.gov/content/prognostics-center-of-excellence-data-set-repository)
-so that `$CMAPPS_DATA_ROOT` contains `train_FD001.txt`, `test_FD001.txt`,
-`RUL_FD001.txt` and the FD003 equivalents.
-
-## Running
+## Quick start
 
 ```bash
-export CMAPPS_DATA_ROOT=/path/to/cmapps        # raw txt + pipeline_output/
-export CMAPPS_OUT_ROOT=/path/to/checkpoints    # default: $CMAPPS_DATA_ROOT/component_ablation
-
-python -m preprocessing FD001        # -> output_FD001_v2.pkl
-python -m preprocessing FD003        # -> output_FD003_v5.pkl
-
-python -m ablation.train                        # full ladder, all seeds
-python -m ablation.train --datasets FD001 --configs 6_plus_healthy_FINAL --seeds 51
-python -m ablation.evaluate                     # score checkpoints + ensemble
+git clone <this-repo> && cd Research
+python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
 ```
+
+Download **CMAPSSData** from the
+[NASA Prognostics Data Repository](https://www.nasa.gov/intelligent-systems-division/discovery-and-systems-health/pcoe/pcoe-data-set-repository/)
+and put six files in `data/`:
+
+```
+data/
+  train_FD001.txt  test_FD001.txt  RUL_FD001.txt
+  train_FD003.txt  test_FD003.txt  RUL_FD003.txt
+```
+
+Then run the three stages from the repository root:
+
+```bash
+python -m preprocessing FD001        # -> data/pipeline_output/output_FD001_v2.pkl
+python -m preprocessing FD003        # -> data/pipeline_output/output_FD003_v5.pkl
+
+python -m ablation.train             # full ladder, all seeds
+python -m ablation.evaluate          # score checkpoints + ensemble
+```
+
+Nothing needs configuring: `data/` and `results/` default to directories
+inside the clone, and both are git-ignored. To put them elsewhere, pass
+`--data-root` / `--out-root` to any command, or set `CMAPPS_DATA_ROOT` /
+`CMAPPS_OUT_ROOT`.
+
+To check the install before downloading anything, run the smoke test — it
+generates synthetic C-MAPSS-format data and drives all three stages:
+
+```bash
+python tests/smoke_test.py
+```
+
+**A full run needs a GPU.** The ladder is 6 configs x 5 seeds x 2 datasets =
+60 trainings, and `ablation.train` warns if no CUDA device is visible. To
+sanity-check the pipeline on CPU first, run one rung with one seed:
+
+```bash
+python -m ablation.train --datasets FD001 --configs 6_plus_healthy_FINAL --seeds 42
+python -m ablation.evaluate --datasets FD001 --configs 6_plus_healthy_FINAL
+```
+
+The first run of a dataset also computes the geometry features, which takes
+longer than a training run; they are cached in
+`results/component_ablation_v2/<dataset>/geom_cache.pkl` and reused by every
+later run.
 
 Training resumes: a `(config, seed)` whose checkpoint already exists is
 skipped unless `--overwrite` is passed. Evaluation discovers whichever
@@ -141,7 +177,7 @@ harder.
 
 ## Outputs
 
-Per dataset, under `$CMAPPS_OUT_ROOT/<dataset>/`:
+Per dataset, under `results/component_ablation_v2/<dataset>/`:
 
 | File | Contents |
 |---|---|
