@@ -121,13 +121,14 @@ def train_one_seed(seed, fn, tr_c, te_c, rul_true, fml, ckpt, cfg, tag=''):
                 epochs=epoch, minutes=elapsed / 60, **m)
 
 
-def run_dataset(subset, configs, seeds, overwrite=False):
+def run_dataset(subset, configs, seeds, overwrite=False, data_root=None, out_root=None):
     print(f"\n{'#' * 75}\n# DATASET = {subset}\n{'#' * 75}")
-    out_dir = os.path.join(OUT_ROOT, subset)
+    out_dir = os.path.join(out_root or OUT_ROOT, subset)
     os.makedirs(out_dir, exist_ok=True)
 
-    fn, tr_c, te_c, rul_true, fml = load_subset(subset, cache_dir=out_dir)
-    print(f"  feature count: {len(fn)}  |  train engines: {tr_c['unit'].nunique()}  "
+    fn, tr_c, te_c, rul_true, fml = load_subset(subset, cache_dir=out_dir,
+                                                data_root=data_root, out_root=out_root)
+    print(f"  train engines: {tr_c['unit'].nunique()}  "
           f"|  test engines: {te_c['unit'].nunique()}")
 
     all_results = {}
