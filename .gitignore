@@ -33,3 +33,6 @@ outputs/
 
 # OS
 Thumbs.db
+
+# Smoke-test scratch workspace
+.smoke_workspace/
