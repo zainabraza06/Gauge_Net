@@ -82,18 +82,13 @@ class RULDataset(Dataset):
             n = len(g)
             rul = np.minimum(g['rul'].values.astype(np.float32) if 'rul' in g.columns
                              else np.zeros(n), RUL_CAP)
-            onset = (g['onset'].values.astype(np.float32) if 'onset' in g.columns
-                     else np.zeros(n))
-            phase_loaded = (g['phase'].values.astype(np.float32) if 'phase' in g.columns
-                            else np.zeros(n, np.float32))
-            if phase_loaded.sum() == 0:
-                t_on = float(onset[0]) if len(onset) else 0.
-                phase_loaded = (g['cycle'].values.astype(np.float32) >= t_on).astype(np.float32)
+            # onset / T_i / phase are deliberately NOT read here. The sample
+            # weight is now a function of capped RUL alone (model.losses
+            # .smooth_weight), so no dataset-specific column can make two
+            # subsets train on different objectives.
             self.engines.append({
-                'feats': g[fn].values.astype(np.float32), 'rul': rul, 'phase': phase_loaded,
-                'onset': onset, 'cycle': g['cycle'].values.astype(np.float32),
-                'T_i': (g['T_i'].values.astype(np.float32) if 'T_i' in g.columns
-                        else np.full(n, float(n), np.float32))})
+                'feats': g[fn].values.astype(np.float32), 'rul': rul,
+                'cycle': g['cycle'].values.astype(np.float32)})
             ei = len(self.engines) - 1
             self.index.extend((ei, t) for t in range(n))
 
@@ -110,9 +105,6 @@ class RULDataset(Dataset):
         hlf = float(e['cycle'][min(n_avail, len(e['cycle'])) - 1] / self.fml)
         return (torch.from_numpy(win),
                 torch.tensor(e['rul'][t] / SCALE, dtype=torch.float32),
-                {k: torch.tensor(e[k][t] / (SCALE if k in ('onset', 'T_i') else 1.),
-                                 dtype=torch.float32)
-                 for k in ['phase', 'onset', 'cycle', 'T_i']},
                 torch.tensor(lf, dtype=torch.float32),
                 torch.from_numpy(hwin),
                 torch.tensor(hlf, dtype=torch.float32),
@@ -120,13 +112,7 @@ class RULDataset(Dataset):
 
 
 def collate(batch):
-    return (torch.stack([b[0] for b in batch]),
-            torch.stack([b[1] for b in batch]),
-            {k: torch.stack([b[2][k] for b in batch]) for k in batch[0][2]},
-            torch.stack([b[3] for b in batch]),
-            torch.stack([b[4] for b in batch]),
-            torch.stack([b[5] for b in batch]),
-            torch.stack([b[6] for b in batch]))
+    return tuple(torch.stack([b[i] for b in batch]) for i in range(len(batch[0])))
 
 
 def build_val_snapshots(df_va, fn, fml, rng_seed, n_trunc=N_VAL_TRUNC):

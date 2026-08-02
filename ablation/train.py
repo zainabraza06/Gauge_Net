@@ -32,7 +32,7 @@ from model.config import (DEVICE, OUT_ROOT, SCALE, H, LR, LR_MIN, WD, GRAD_CLIP,
 from model.data import load_subset
 from model.igrfnet import build_model
 from model.inference import mc_predict, predict_test_set
-from model.losses import asym_huber, phase_weight
+from model.losses import asym_huber, smooth_weight
 from model.metrics import nasa_score, all_metrics, ACC_THRESHOLDS
 from model.windows import RULDataset, collate, build_val_snapshots, val_engines_for_seed
 
@@ -72,14 +72,13 @@ def train_one_seed(seed, fn, tr_c, te_c, rul_true, fml, ckpt, cfg, tag=''):
     epoch = 0
     for epoch in range(1, EPOCHS + 1):
         model.train()
-        for feats, rul_s, meta, lf, hwin, hlf, hgate in dl_tr:
+        for feats, rul_s, lf, hwin, hlf, hgate in dl_tr:
             feats, rul_s, lf = feats.to(DEVICE), rul_s.to(DEVICE), lf.to(DEVICE)
-            meta = {k: v.to(DEVICE) for k, v in meta.items()}
             hwin, hlf, hgate = hwin.to(DEVICE), hlf.to(DEVICE), hgate.to(DEVICE)
             pred = model(feats, lf,
                          x_healthy=hwin if use_healthy else None,
                          lf_healthy=hlf, healthy_gate=hgate)
-            omega = phase_weight(meta['phase'], meta['onset'], meta['cycle'], meta['T_i'])
+            omega = smooth_weight(rul_s)
             loss = (omega * asym_huber(pred, rul_s)).mean()
             opt.zero_grad()
             loss.backward()
