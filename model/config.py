@@ -6,10 +6,17 @@ have to agree on lives here, so a change cannot be applied to one stage and
 silently missed by another (window length W and RUL_CAP in particular are
 baked into both the cached geometry features and the trained checkpoints).
 
-Paths default to the Colab Drive layout the experiments were run on and can
-be redirected without editing the file:
+Paths default to directories inside the cloned repository, so the study runs
+after a clone with no configuration. Override either one by environment
+variable, or per run with --data-root / --out-root:
+
     CMAPPS_DATA_ROOT   raw C-MAPSS text files + pipeline_output/
+                       default: <repo>/data
     CMAPPS_OUT_ROOT    checkpoints, geometry cache, result tables
+                       default: <repo>/results/component_ablation_v2
+
+Both default directories are git-ignored: the C-MAPSS archive is NASA's to
+distribute, and checkpoints are far too large to version.
 """
 
 import os
@@ -19,12 +26,15 @@ os.environ.setdefault('PYTHONHASHSEED', '0')
 
 import torch
 
-DATA_ROOT = os.environ.get('CMAPPS_DATA_ROOT', '/content/drive/MyDrive/cmapps')
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+DATA_ROOT = os.environ.get('CMAPPS_DATA_ROOT', os.path.join(REPO_ROOT, 'data'))
 # v2: the corrected pipeline (no baseline features) and unified weighting
 # differ from what everything under component_ablation/ was trained with, so
 # results are written alongside rather than over them. The old checkpoints stay
 # available but are NOT comparable: different loss, different feature count.
-OUT_ROOT = os.environ.get('CMAPPS_OUT_ROOT', os.path.join(DATA_ROOT, 'component_ablation_v2'))
+OUT_ROOT = os.environ.get('CMAPPS_OUT_ROOT',
+                          os.path.join(REPO_ROOT, 'results', 'component_ablation_v2'))
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 

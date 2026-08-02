@@ -20,7 +20,7 @@ import os
 
 import numpy as np
 
-from model.config import DEVICE, OUT_ROOT, DATASETS
+from model.config import DEVICE, DATA_ROOT, OUT_ROOT, DATASETS
 from model.data import load_subset
 from model.inference import discover_seeds, evaluate_checkpoint
 from model.metrics import ACC_THRESHOLDS
@@ -42,14 +42,16 @@ def write_csv(path, rows):
     return True
 
 
-def run_dataset(subset, configs):
+def run_dataset(subset, configs, data_root=None, out_root=None):
     print(f"\n{'#' * 75}\n# DATASET = {subset}\n{'#' * 75}")
-    out_dir = os.path.join(OUT_ROOT, subset)
+    out_dir = os.path.join(out_root or OUT_ROOT, subset)
     if not os.path.isdir(out_dir):
-        print(f"  no checkpoint directory at {out_dir} -- skipping")
+        print(f"  no checkpoint directory at {out_dir} -- skipping "
+              f"(run 'python -m ablation.train' first)")
         return None
 
-    fn, tr_c, te_c, rul_true, fml = load_subset(subset, cache_dir=out_dir)
+    fn, tr_c, te_c, rul_true, fml = load_subset(subset, cache_dir=out_dir,
+                                                data_root=data_root, out_root=out_root)
     print(f"  feature count: {len(fn)}")
 
     all_ensembles = {}
@@ -119,24 +121,29 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
     ap.add_argument('--datasets', nargs='+', default=DATASETS)
     ap.add_argument('--configs', nargs='+', default=None)
+    ap.add_argument('--data-root', default=DATA_ROOT,
+                    help=f'raw data + pipeline_output (default: {DATA_ROOT})')
+    ap.add_argument('--out-root', default=OUT_ROOT,
+                    help=f'checkpoints and result tables (default: {OUT_ROOT})')
     args = ap.parse_args()
     configs = [config_by_name(n) for n in args.configs] if args.configs else CONFIGS
 
     print("=" * 75)
     print("COMPONENT-BY-COMPONENT ABLATION -- load checkpoints + ensembling suite")
     print(f"device={DEVICE}  datasets={args.datasets}")
+    print(f"out_root={args.out_root}")
     print(f"configs={[c['name'] for c in configs]}")
     print("=" * 75)
 
     summaries = {}
     all_rows = []
     for subset in args.datasets:
-        s = run_dataset(subset, configs)
+        s = run_dataset(subset, configs, data_root=args.data_root, out_root=args.out_root)
         if s is not None:
             summaries[subset] = s
             all_rows.extend(s['csv_rows'])
 
-    combined = os.path.join(OUT_ROOT, 'all_datasets_full_metrics_table.csv')
+    combined = os.path.join(args.out_root, 'all_datasets_full_metrics_table.csv')
     if write_csv(combined, all_rows):
         print(f"\nwrote combined metrics table: {combined}")
 

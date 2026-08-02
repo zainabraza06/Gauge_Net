@@ -27,8 +27,8 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR, SequentialLR
 from torch.utils.data import DataLoader
 
-from model.config import (DEVICE, OUT_ROOT, SCALE, H, LR, LR_MIN, WD, GRAD_CLIP, EPOCHS,
-                          WARMUP_EP, BATCH, PATIENCE, MC_PASSES_VAL, DATASETS)
+from model.config import (DEVICE, DATA_ROOT, OUT_ROOT, SCALE, LR, LR_MIN, WD, GRAD_CLIP,
+                          EPOCHS, WARMUP_EP, BATCH, PATIENCE, MC_PASSES_VAL, DATASETS)
 from model.data import load_subset
 from model.igrfnet import build_model
 from model.inference import mc_predict, predict_test_set
@@ -173,6 +173,10 @@ def main():
     ap.add_argument('--seeds', nargs='+', type=int, default=SEEDS)
     ap.add_argument('--overwrite', action='store_true',
                     help='retrain even where a checkpoint already exists')
+    ap.add_argument('--data-root', default=DATA_ROOT,
+                    help=f'raw data + pipeline_output (default: {DATA_ROOT})')
+    ap.add_argument('--out-root', default=OUT_ROOT,
+                    help=f'checkpoints and result tables (default: {OUT_ROOT})')
     args = ap.parse_args()
 
     configs = [config_by_name(n) for n in args.configs] if args.configs else CONFIGS
@@ -180,9 +184,15 @@ def main():
     print("COMPONENT-BY-COMPONENT ABLATION -- training")
     print(f"device={DEVICE}  datasets={args.datasets}  seeds={args.seeds}")
     print(f"configs={[c['name'] for c in configs]}")
+    print(f"data_root={args.data_root}")
+    print(f"out_root ={args.out_root}")
+    if DEVICE == 'cpu':
+        print("NOTE: no CUDA device found -- training will run on CPU, which is far "
+              "slower.\n      Use --configs / --seeds to run a subset.")
     print("=" * 75)
     for subset in args.datasets:
-        run_dataset(subset, configs, args.seeds, overwrite=args.overwrite)
+        run_dataset(subset, configs, args.seeds, overwrite=args.overwrite,
+                    data_root=args.data_root, out_root=args.out_root)
 
 
 if __name__ == '__main__':

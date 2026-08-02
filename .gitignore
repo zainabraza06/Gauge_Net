@@ -14,7 +14,9 @@ venv/
 # Jupyter
 .ipynb_checkpoints/
 
-# Data and outputs
+# Data and outputs -- both default locations for a local run.
+# The C-MAPSS archive is NASA's to distribute; checkpoints are too large to version.
+data/
 cmapps/
 cmapps_baseline/
 results/

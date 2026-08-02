@@ -34,7 +34,7 @@ CONFIGS = [
          use_reverse=True, use_spectral=True, use_healthy=True),
 ]
 
-SEEDS = [51, 53, 43, 42, 3]
+SEEDS = [42, 43, 53, 51, 3]
 
 
 def config_by_name(name):
