@@ -37,12 +37,23 @@ def load_subset(subset, cache_dir=None):
     with open(pipeline_path(subset), 'rb') as f:
         out = pickle.load(f)
     traj_fn = out['trajectory_feature_names'][subset]
+    # Baseline features were ablated out (worse TEST_NASA on both subsets), so
+    # the v2/v5 pipelines emit an empty list here. An older pickle would still
+    # carry 14 baseline columns, which would silently change the feature count
+    # a checkpoint was trained against -- so say what was found rather than
+    # concatenating whatever turns up.
     base_fn = out['baseline_feature_names'][subset]
+    if base_fn:
+        print(f"  WARNING: {os.path.basename(pipeline_path(subset))} carries "
+              f"{len(base_fn)} baseline features; the v2/v5 pipelines emit none. "
+              f"They are being INCLUDED -- regenerate the pickle to drop them.")
     tr_raw = out['feature_data'][subset]['train']
     te_raw = out['feature_data'][subset]['test']
 
     geom_cols, tr_c, te_c = build_geometry(traj_fn, tr_raw, te_raw, cache_dir)
     fn = traj_fn + base_fn + geom_cols
+    print(f"  features: {len(traj_fn)} sensors + {len(base_fn)} baseline "
+          f"+ {len(geom_cols)} geometry = {len(fn)}")
 
     rul_file = os.path.join(DATA_ROOT, f'RUL_{subset}.txt')
     rul_true = np.minimum(

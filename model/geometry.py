@@ -170,11 +170,24 @@ def build_geometry(traj_fn, tr_c, te_c, cache_dir):
     consumes exactly the same features. Both fleet references are fitted on
     TRAIN only, so no test information reaches the features.
     """
+    # The cache holds the FULL frames, not just the geometry columns, so a
+    # cache built from an older pipeline would silently supply that pipeline's
+    # labels and columns to a new run. Stamp what it was built from and rebuild
+    # when that changes -- W and HEALTHY_FRAC because they define the features,
+    # the source columns and row count because they define the frames.
+    signature = dict(w=W, healthy_frac=HEALTHY_FRAC, traj_fn=list(traj_fn),
+                     train_cols=sorted(map(str, tr_c.columns)),
+                     test_cols=sorted(map(str, te_c.columns)),
+                     n_train=len(tr_c), n_test=len(te_c))
+
     cache_path = os.path.join(cache_dir, 'geom_cache.pkl')
     if os.path.exists(cache_path):
         with open(cache_path, 'rb') as f:
             cache = pickle.load(f)
-        return cache['geom_cols'], cache['tr_ext'], cache['te_ext']
+        if cache.get('signature') == signature:
+            return cache['geom_cols'], cache['tr_ext'], cache['te_ext']
+        print(f"  geometry cache at {cache_path} was built from a different "
+              f"pipeline output -- recomputing")
 
     ref_spd = compute_ref_spd_single(tr_c, traj_fn)
     was_ref = compute_was_ref_single(tr_c, traj_fn)
@@ -190,5 +203,6 @@ def build_geometry(traj_fn, tr_c, te_c, cache_dir):
 
     os.makedirs(cache_dir, exist_ok=True)
     with open(cache_path, 'wb') as f:
-        pickle.dump(dict(geom_cols=GEOM_COLS, tr_ext=tr_ext, te_ext=te_ext), f)
+        pickle.dump(dict(geom_cols=GEOM_COLS, tr_ext=tr_ext, te_ext=te_ext,
+                         signature=signature), f)
     return GEOM_COLS, tr_ext, te_ext

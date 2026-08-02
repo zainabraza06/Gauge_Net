@@ -20,7 +20,11 @@ os.environ.setdefault('PYTHONHASHSEED', '0')
 import torch
 
 DATA_ROOT = os.environ.get('CMAPPS_DATA_ROOT', '/content/drive/MyDrive/cmapps')
-OUT_ROOT = os.environ.get('CMAPPS_OUT_ROOT', os.path.join(DATA_ROOT, 'component_ablation'))
+# v2: the corrected pipeline (no baseline features) and unified weighting
+# differ from what everything under component_ablation/ was trained with, so
+# results are written alongside rather than over them. The old checkpoints stay
+# available but are NOT comparable: different loss, different feature count.
+OUT_ROOT = os.environ.get('CMAPPS_OUT_ROOT', os.path.join(DATA_ROOT, 'component_ablation_v2'))
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -66,7 +70,8 @@ NEAR_WINDOW = 8       # local attention span of the near path
 DATASETS = ['FD001', 'FD003']
 
 # Preprocessed input produced by the preprocessing package, per subset.
-PIPELINE_VERSION = {'FD001': 'v1', 'FD003': 'v4'}
+# v2/v5 = no baseline features, unified smooth weighting.
+PIPELINE_VERSION = {'FD001': 'v2', 'FD003': 'v5'}
 
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
