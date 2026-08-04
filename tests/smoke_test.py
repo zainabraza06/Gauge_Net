@@ -14,6 +14,7 @@ stages that already completed are skipped.
 """
 
 import os
+import pickle
 import subprocess
 import sys
 
@@ -25,6 +26,8 @@ DATA = os.path.join(WS, 'data')
 OUT = os.path.join(WS, 'results')
 CONFIG = '6_plus_healthy_FINAL'
 SEED = 42
+SENSORS = ['s2', 's3', 's4', 's7', 's8', 's9', 's11', 's12',
+           's13', 's14', 's15', 's17', 's20', 's21']
 
 rng = np.random.default_rng(0)
 
@@ -104,8 +107,15 @@ def main():
     out = run(['-m', 'preprocessing', 'FD001', '--data-root', DATA])
     assert 'ALL CHECKS PASSED' in out, out[-2000:]
     assert '14 trajectory features, 0 baseline features' in out
-    assert os.path.exists(os.path.join(DATA, 'pipeline_output', 'output_FD001_final.pkl'))
-    print("  [2] preprocessing -> output_FD001_final.pkl, verification passed  OK")
+    pkl = os.path.join(DATA, 'pipeline_output', 'output_FD001_final.pkl')
+    assert os.path.exists(pkl)
+    # The pickle must carry the trajectory features and the label, nothing
+    # else: a stray sample_weight/onset/T_i/phase column is how the two
+    # subsets previously drifted onto different objectives.
+    with open(pkl, 'rb') as f:
+        cols = set(pickle.load(f)['feature_data']['FD001']['train'].columns)
+    assert not cols - ({'unit', 'cycle', 'rul_true', 'rul'} | set(SENSORS)), sorted(cols)
+    print("  [2] preprocessing -> output_FD001_final.pkl, closed schema, checks passed  OK")
 
     if not os.path.isdir(os.path.join(OUT, 'FD001')):
         out = run(['-m', 'ablation.evaluate', '--datasets', 'FD001',
