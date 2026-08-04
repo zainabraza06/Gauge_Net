@@ -140,7 +140,7 @@ def evaluate_checkpoint(seed, fn, tr_c, te_c, rul_true, fml, ckpt, cfg, tag='',
     acc_str = "  ".join(f"Acc(+/-{k})={m[f'acc{k}']*100:.1f}%" for k in ACC_THRESHOLDS)
     print(f"  [{tag}] params={npar:,}  seed={seed}  TEST_NASA={m['nasa']:.2f}  "
           f"RMSE={m['rmse']:.3f}  MAE={m['mae']:.3f}  MeanErr={m['mean_error']:+.3f}  "
-          f"{acc_str}  val_NASA={val_nasa:.2f}  "
+          f"MAPE={m['mape']:.1f}%  R2={m['r2']:.3f}  {acc_str}  val_NASA={val_nasa:.2f}  "
           f"inference={ms_per_engine:.1f}ms/engine  ({n_test_engines} engines)")
 
     del model

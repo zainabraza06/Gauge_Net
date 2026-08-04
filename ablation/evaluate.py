@@ -29,7 +29,8 @@ from .configs import CONFIGS, config_by_name
 from .ensembling import run_ensembling_suite
 
 CSV_COLS = (['dataset', 'config', 'technique', 'n_members', 'n_params',
-             'nasa', 'rmse', 'mae', 'mean_error'] + [f'acc{k}' for k in ACC_THRESHOLDS])
+             'nasa', 'rmse', 'mae', 'mean_error', 'mape', 'r2']
+            + [f'acc{k}' for k in ACC_THRESHOLDS])
 
 
 def write_csv(path, rows):
@@ -92,11 +93,12 @@ def run_dataset(subset, configs, data_root=None, out_root=None):
                 continue
             acc_str = "  ".join(f"Acc{k}={m[f'acc{k}'] * 100:.1f}%" for k in ACC_THRESHOLDS)
             print(f"    {technique:<16}: NASA={m['nasa']:>8.2f}  RMSE={m['rmse']:.3f}  "
-                  f"MAE={m['mae']:.3f}  MeanErr={m['mean_error']:+.3f}  {acc_str}")
+                  f"MAE={m['mae']:.3f}  MeanErr={m['mean_error']:+.3f}  "
+                  f"MAPE={m['mape']:.1f}%  R2={m['r2']:.3f}  {acc_str}")
             csv_rows.append(dict(dataset=subset, config=name, technique=technique,
                                  n_members=len(members), n_params=members[0]['n_params'],
                                  **{k: m[k] for k in
-                                    ['nasa', 'rmse', 'mae', 'mean_error']},
+                                    ['nasa', 'rmse', 'mae', 'mean_error', 'mape', 'r2']},
                                  **{f'acc{k}': m[f'acc{k}'] for k in ACC_THRESHOLDS}))
 
     with open(os.path.join(out_dir, 'loaded_component_ensembles_full.json'), 'w') as f:

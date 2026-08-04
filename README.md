@@ -175,7 +175,12 @@ Two things worth carrying into any write-up:
 
 `nasa` (PHM08 asymmetric score, a **sum** — only comparable across equally
 sized test sets), `rmse`, `mae`, `mean_error` (signed; positive means
-over-predicting RUL, the dangerous direction) and `Accuracy(±5/10/13/15/20)`.
+over-predicting RUL, the dangerous direction), `mape`, `r2` and
+`Accuracy(±5/10/13/15/20)`.
+
+`mape` floors its denominator at 1 cycle: true RUL reaches 0 at failure, so
+the engines the score cares about most would otherwise each contribute an
+unbounded term. Read it as a diagnostic, not a headline.
 
 Model selection during training is on validation NASA, not RMSE: the two
 disagree about the best epoch because NASA penalises late predictions far
