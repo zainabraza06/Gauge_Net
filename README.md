@@ -18,13 +18,13 @@ preprocessing/     raw C-MAPSS text  ->  leak-free feature pickle
 
 model/             everything shared by training and evaluation
   config.py          hyperparameters and paths (env-overridable)
-  metrics.py         NASA score, RMSE, MAE, mean error, Accuracy(±k)
+  metrics.py         NASA score, RMSE, MAE, mean error, MAPE, R², Accuracy(±k)
   losses.py          unweighted asymmetric Huber
   geometry.py        Riemannian / Wasserstein drift features (cached)
   windows.py         causal windowing, dataset, validation snapshots
-  modules.py         sensor branch, fusion, temporal blocks, pooling
+  modules.py         TCN + attention blocks, sensor branch, fusion, pooling
   igrfnet.py         the ablatable network + build_model(cfg)
-  data.py            load a subset and attach geometry features
+  data.py            load a subset, attach geometry, select a config's features
   inference.py       MC-dropout prediction, per-engine scoring, checkpoints
 
 tests/
@@ -34,6 +34,7 @@ ablation/          the study itself
   configs.py         the six-rung cumulative ladder + training run order
   train.py           python -m ablation.train
   ensembling.py      eight ways of combining a config's seeds
+  stats.py           paired tests between adjacent rungs
   evaluate.py        python -m ablation.evaluate
 ```
 
@@ -148,6 +149,24 @@ against **the engine's own history** (`riem_personal`, `was_personal`). The
 Riemannian pair responds to changes in coupling *between* sensors, the
 Wasserstein pair to changes in each sensor's own distribution. They are
 cached in `geom_cache.pkl`, since computing them costs more than training.
+
+## Reading the deltas
+
+`ablation.evaluate` prints each rung against the one below it, paired by seed:
+every rung trains on the same seed list, and a seed fixes the validation
+split, the end-of-life trim and the initialisation, so a pair differs by the
+component under test alone.
+
+Four things are reported per step — paired t-test, Wilcoxon, Cohen's d, and a
+bootstrap 95% CI on the mean difference — because no one of them is
+trustworthy at five seeds. In particular **Wilcoxon cannot return p < 0.05
+with five pairs at all** (its smallest attainable two-sided p is 0.0625), so a
+non-significant Wilcoxon here is not evidence of no effect. Read the effect
+size and whether the interval excludes zero.
+
+Sign convention: `previous - current`, so a positive delta means the metric
+fell when the component was added, and every metric in that table is
+lower-is-better.
 
 ## Ensembling
 
