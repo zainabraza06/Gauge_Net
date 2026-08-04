@@ -25,7 +25,11 @@ WS = os.path.join(REPO, '.smoke_workspace')
 DATA = os.path.join(WS, 'data')
 OUT = os.path.join(WS, 'results')
 CONFIG = 'full_model'
-SEED = 42
+# A second, cheap rung so the paired step-delta table has a pair to compare.
+# Two seeds because the deltas need >=2 shared seeds to be computable at all.
+BASELINE_CONFIG = 'tcn_baseline'
+SEEDS = [42, 43]
+SEED = SEEDS[0]
 SENSORS = ['s2', 's3', 's4', 's7', 's8', 's9', 's11', 's12',
            's13', 's14', 's15', 's17', 's20', 's21']
 
@@ -126,15 +130,21 @@ def main():
     train_stub = write_stub('run_train.py', f"""
 import ablation.train as T
 T.EPOCHS = 2; T.WARMUP_EP = 1; T.PATIENCE = 2
-T.run_dataset('FD001', [T.config_by_name({CONFIG!r})], [{SEED}],
+T.run_dataset('FD001', [T.config_by_name(n) for n in ({CONFIG!r}, {BASELINE_CONFIG!r})], {SEEDS!r},
               data_root=r'{DATA}', out_root=r'{OUT}')
 """)
     out = run([train_stub])
     assert 'TEST_NASA' in out, out[-2000:]
     assert 'features: 14 sensors + 4 geometry available = 18' in out
     assert 'full_model  (18 features, geometry=True)' in out
-    assert os.path.exists(os.path.join(OUT, 'FD001', f'{CONFIG}_seed{SEED}.pt'))
-    print("  [4] training -> checkpoint written, 18 features confirmed  OK")
+    # tcn_baseline trains on the 14 sensors alone: the geometry rung is above
+    # it on the ladder, so a config below it must not be fed those columns.
+    assert 'tcn_baseline  (14 features, geometry=False)' in out
+    for name in (CONFIG, BASELINE_CONFIG):
+        for seed in SEEDS:
+            assert os.path.exists(os.path.join(OUT, 'FD001', f'{name}_seed{seed}.pt'))
+        assert os.path.exists(os.path.join(OUT, 'FD001', f'{name}_preds.npz'))
+    print("  [4] training -> checkpoints + raw predictions, per-rung features correct  OK")
 
     out = run([train_stub])
     assert 'checkpoint exists, skipping' in out
@@ -142,21 +152,25 @@ T.run_dataset('FD001', [T.config_by_name({CONFIG!r})], [{SEED}],
 
     eval_stub = write_stub('run_eval.py', f"""
 import ablation.evaluate as E
-E.run_dataset('FD001', [E.config_by_name({CONFIG!r})],
+E.run_dataset('FD001', [E.config_by_name(n) for n in ({BASELINE_CONFIG!r}, {CONFIG!r})],
               data_root=r'{DATA}', out_root=r'{OUT}')
 """)
     out = run([eval_stub])
-    assert f'found seeds: [{SEED}]' in out, out[-2000:]
-    # One member: the techniques that need 2 or 3 must skip, with a reason.
+    assert f'found seeds: {SEEDS}' in out, out[-2000:]
+    # Two members: best_k_mean needs three, so it must skip WITH a reason,
+    # while rank_average now has enough members to be computed.
     assert 'best_k_mean     : SKIPPED (needs >=3 members' in out
-    assert 'rank_average    : SKIPPED (needs >=2 members' in out
     csv = os.path.join(OUT, 'FD001', 'FD001_full_metrics_table.csv')
     assert os.path.exists(csv)
-    print("  [6] evaluate -> scored checkpoint, single-member skips correct  OK")
+    print("  [6] evaluate -> scored checkpoints, member-count skips correct  OK")
+
+    assert f'{BASELINE_CONFIG} -> {CONFIG}' in out, out[-3000:]
+    assert 'boot 95% CI=' in out and 'paired-t p=' in out
+    print("  [7] step deltas -> adjacent rungs paired by seed, tests reported  OK")
 
     assert os.path.exists(os.path.join(OUT, 'FD001', 'geom_cache.pkl'))
     assert 'recomputing' not in out
-    print("  [7] geometry cache reused rather than recomputed  OK")
+    print("  [8] geometry cache reused rather than recomputed  OK")
 
     print("\n" + "=" * 70)
     print("SMOKE TEST PASSED -- the clone-and-run path works end to end")
