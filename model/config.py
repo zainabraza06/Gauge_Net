@@ -29,10 +29,10 @@ import torch
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 DATA_ROOT = os.environ.get('CMAPPS_DATA_ROOT', os.path.join(REPO_ROOT, 'data'))
-# v2: the corrected pipeline (no baseline features) and unified weighting
-# differ from what everything under component_ablation/ was trained with, so
-# results are written alongside rather than over them. The old checkpoints stay
-# available but are NOT comparable: different loss, different feature count.
+# The final pipeline (no baseline features) and the unweighted loss differ from
+# what everything under component_ablation/ was trained with, so results are
+# written alongside rather than over them. The old checkpoints stay available
+# but are NOT comparable: different loss, different feature count.
 OUT_ROOT = os.environ.get('CMAPPS_OUT_ROOT',
                           os.path.join(REPO_ROOT, 'results', 'component_ablation_v2'))
 
@@ -54,11 +54,7 @@ END_TRIM_MAX = 5      # random end-of-life trim, augments run-to-failure data
 
 # ── loss shaping ──
 BETA = 1.5            # asymmetric Huber: penalty multiplier for late predictions
-# Sample weight, from capped RUL alone: 1.0 at or above the cap, rising to
-# 1 + WEIGHT_MAX at failure. Must match preprocessing.pipeline's W_MAX/GAMMA,
-# which produce the sample_weight column emitted for inspection.
-WEIGHT_MAX = 3.0
-WEIGHT_GAMMA = 2.0
+# No sample-weight constants: the loss is unweighted (see model.losses).
 
 # ── geometry features ──
 HEALTHY_FRAC = 0.20   # leading fraction of a trajectory treated as healthy
