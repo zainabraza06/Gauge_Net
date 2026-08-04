@@ -169,11 +169,19 @@ lower-is-better.
 
 ## Ensembling
 
-The seeds of one config are combined eight ways: `mean`, `median`,
-`best_k_mean`, `val_weighted`, `softmax_sharp`, `softmax_soft`,
-`rank_average`, `bias_corrected`. A technique that cannot be computed from
-the members found is skipped **with a recorded reason**, so a missing row in
-the results table is never ambiguous.
+The seeds of one config are combined seven ways: `mean`, `median`,
+`trimmed_mean`, `val_weighted`, `softmax_sharp`, `softmax_soft`,
+`rank_average`. A technique that cannot be computed from the members found is
+skipped **with a recorded reason**, so a missing row in the results table is
+never ambiguous. Combined predictions are written to
+`<config>_ensemble_preds.npz`.
+
+Each technique is then tested against the plain `mean`, **paired per engine**.
+That is the one comparison in this study with real statistical power — the
+pairing is over ~100 engines rather than 5 seeds — but it says which technique
+scored better on this test set, not which generalises better: the
+validation-weighted techniques have already seen the signal they are weighted
+by.
 
 Two things worth carrying into any write-up:
 
@@ -181,6 +189,16 @@ Two things worth carrying into any write-up:
   out different engines, so `best_val_nasa` carries split difficulty as well
   as model quality. It ranks members adequately; it is not a calibrated
   quality estimate.
+- **Affine bias correction was removed.** `bias_corrected` fitted a
+  correction from pooled validation residuals and applied it to the test
+  predictions — a free parameter no other technique gets, fitted on the data
+  the members were already selected on, so its margin could not be separated
+  from that advantage.
+- **`rank_average` ranks engines, not members.** Ranking across members is
+  degenerate: every engine's rank column is a permutation of `0..n-1`, the
+  mean rank is the same constant for every engine, and the result collapses to
+  the median exactly. The implementation here ranks the engines each member
+  scored, which keeps a member's ordering useful even if its RUL scale is off.
 - **Ridge stacking is not offered.** Fitting per-member blend weights needs a
   snapshot set every member can be scored on and none of them trained on —
   the engines held out by *all* members. With five seeds holding out 20% each
