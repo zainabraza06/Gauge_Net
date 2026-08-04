@@ -13,13 +13,13 @@ the training split only.
 
 ```
 preprocessing/     raw C-MAPSS text  ->  leak-free feature pickle
-  pipeline.py        z-score, RUL cap, unified sample weighting
+  pipeline.py        z-score, RUL cap, trajectory + label only
   __main__.py        python -m preprocessing FD001
 
 model/             everything shared by training and evaluation
   config.py          hyperparameters and paths (env-overridable)
   metrics.py         NASA score, RMSE, MAE, mean error, Accuracy(±k)
-  losses.py          asymmetric Huber + RUL-only sample weighting
+  losses.py          unweighted asymmetric Huber
   geometry.py        Riemannian / Wasserstein drift features (cached)
   windows.py         causal windowing, dataset, validation snapshots
   modules.py         sensor gate, spectral gate, temporal blocks, pooling
@@ -58,8 +58,8 @@ data/
 Then run the three stages from the repository root:
 
 ```bash
-python -m preprocessing FD001        # -> data/pipeline_output/output_FD001_v2.pkl
-python -m preprocessing FD003        # -> data/pipeline_output/output_FD003_v5.pkl
+python -m preprocessing FD001        # -> data/pipeline_output/output_FD001_final.pkl
+python -m preprocessing FD003        # -> data/pipeline_output/output_FD003_final.pkl
 
 python -m ablation.train             # full ladder, all seeds
 python -m ablation.evaluate          # score checkpoints + ensemble
@@ -113,7 +113,7 @@ differ by that component alone.
 A rung's name is its checkpoint filename prefix (`<name>_seed<seed>.pt`), so
 renaming one orphans its checkpoints.
 
-## Features and weighting
+## Features and objective
 
 **18 features**: 14 raw sensors + 4 geometry columns. The 14 causal
 expanding-baseline columns were ablated against a no-baseline control and made
@@ -122,13 +122,19 @@ the healthy-window cross-attention, which already performs a learned
 per-engine offset comparison. `baseline_feature_names` is emitted as an empty
 list so loaders keep working.
 
-**One weighting function for every subset.** The sample weight is
-`1 + 3*(1 - RUL/125)^2`: exactly 1.0 at or above the cap, 4.0 at failure,
-smooth throughout. It depends on capped RUL alone, so no dataset-specific
-column can make two subsets train on different objectives. That is what
-previously happened: FD001 emitted `onset`/`T_i`/`phase` and FD003 did not, and
-the dataset silently substituted `onset=0, phase=1`, ramping FD003's weight
-across the whole trajectory instead of only the degradation window.
+**No sample weighting.** The loss is a plain unweighted asymmetric Huber,
+whose late side (over-predicting RUL) is scaled by `BETA = 1.5`. Two weighted
+variants were ablated against it — a smooth ramp in capped RUL, and an added
+differentiable NASA-score surrogate — and neither beat it, so both are gone
+rather than switched off.
+
+Weighting is also where a real bug lived, worth recording: FD001 used to emit
+`onset`/`T_i`/`phase` and FD003 did not, and the dataset silently substituted
+`onset=0, phase=1`, so FD003 ramped its weight across the whole trajectory
+while FD001 ramped it only across the degradation window — two objectives from
+code that looked dataset-agnostic. The pipeline now emits 14 z-scored sensors
+and the capped RUL and nothing else, and both the pipeline's verification and
+the smoke test assert that schema is closed.
 
 Results go to `component_ablation_v2/`. Checkpoints under the older
 `component_ablation/` are **not** comparable: different loss, different
