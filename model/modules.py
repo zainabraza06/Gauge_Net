@@ -15,11 +15,9 @@ never earned its place is not a rung of the ladder.
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from .config import (W, DROPOUT, SENSOR_BRANCH_DIM, SENSOR_BRANCH_HEADS,
-                     SENSOR_BRANCH_LAYERS, ATTN_HEADS, NEAR_WINDOW,
-                     TCN_LAYERS, TCN_KERNEL)
+                     SENSOR_BRANCH_LAYERS, ATTN_HEADS, NEAR_WINDOW)
 
 
 class SensorRelationshipBranch(nn.Module):
@@ -158,47 +156,6 @@ class CausalSelfAttnFF(nn.Module):
         a, _ = self.attn(x, x, x, attn_mask=mask)
         x = self.ln1(x + a)
         return self.ln2(x + self.ff(x))
-
-
-class CausalTCNLayer(nn.Module):
-    """One dilated causal convolution, residual and layer-normed.
-
-    Left-padding by (kernel-1)*dilation and using no right padding is what
-    makes it causal: output t sees inputs <= t only. Stacking layers with
-    doubling dilation grows the receptive field exponentially without
-    attention.
-    """
-
-    def __init__(self, channels, kernel=TCN_KERNEL, dilation=1):
-        super().__init__()
-        self.pad = (kernel - 1) * dilation
-        self.conv = nn.Conv1d(channels, channels, kernel, dilation=dilation)
-        self.ln = nn.LayerNorm(channels)
-        self.drop = nn.Dropout(DROPOUT)
-
-    def forward(self, x):
-        xc = F.pad(x.transpose(1, 2), (self.pad, 0))
-        out = F.gelu(self.conv(xc)).transpose(1, 2)
-        return self.ln(x + self.drop(out))
-
-
-class TCNBackbone(nn.Module):
-    """The ladder's bottom rung: a causal dilated conv stack, no attention.
-
-    It is the reference the transformer rungs have to beat -- convolution is
-    the cheaper and more conventional way to encode a fixed-length causal
-    window, so an attention backbone has to earn its cost against it.
-    """
-
-    def __init__(self, h_dim, n_layers=TCN_LAYERS, kernel=TCN_KERNEL):
-        super().__init__()
-        self.layers = nn.ModuleList([
-            CausalTCNLayer(h_dim, kernel=kernel, dilation=2 ** i) for i in range(n_layers)])
-
-    def forward(self, x):
-        for layer in self.layers:
-            x = layer(x)
-        return x
 
 
 class TemporalBlock(nn.Module):

@@ -22,7 +22,7 @@ model/             everything shared by training and evaluation
   losses.py          unweighted asymmetric Huber
   geometry.py        Riemannian / Wasserstein drift features (cached)
   windows.py         causal windowing, dataset, validation snapshots
-  modules.py         TCN + attention blocks, sensor branch, fusion, pooling
+  modules.py         attention blocks, sensor branch, fusion, pooling
   igrfnet.py         the ablatable network + build_model(cfg)
   data.py            load a subset, attach geometry, select a config's features
   inference.py       MC-dropout prediction, per-engine scoring, checkpoints
@@ -31,7 +31,7 @@ tests/
   smoke_test.py      end-to-end run on synthetic data, no NASA archive needed
 
 ablation/          the study itself
-  configs.py         the six-rung cumulative ladder + training run order
+  configs.py         the five-rung cumulative ladder + training run order
   train.py           python -m ablation.train
   ensembling.py      eight ways of combining a config's seeds
   stats.py           paired tests between adjacent rungs
@@ -78,8 +78,8 @@ generates synthetic C-MAPSS-format data and drives all three stages:
 python tests/smoke_test.py
 ```
 
-**A full run needs a GPU.** The ladder is 6 configs x 5 seeds x 2 datasets =
-60 trainings, and `ablation.train` warns if no CUDA device is visible. To
+**A full run needs a GPU.** The ladder is 5 configs x 5 seeds x 2 datasets =
+50 trainings, and `ablation.train` warns if no CUDA device is visible. To
 sanity-check the pipeline on CPU first, run one rung with one seed:
 
 ```bash
@@ -104,8 +104,7 @@ differ by that component alone.
 
 | Rung | Adds | Features | Params |
 |---|---|---|---|
-| `tcn_baseline` | dilated causal convolutions, no attention | 14 | 140,354 |
-| `transformer` | single full-causal attention path | 14 | 308,834 |
+| `transformer` | single full-causal attention path (the reference) | 14 | 308,834 |
 | `near_far` | local path + content-conditioned mixing gate (+ near→far cross-attention) | 14 | 570,656 |
 | `geometry` | Riemannian / Wasserstein drift features | 18 | 571,040 |
 | `sensor_branch` | iTransformer cross-sensor branch + cross-attention fusion | 18 | 745,984 |

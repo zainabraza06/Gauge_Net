@@ -6,10 +6,8 @@ two adjacent rows is attributable to that component alone. Nothing is ever
 removed on the way up, which is what makes the ladder cumulative rather than
 a leave-one-out study.
 
-  tcn_baseline   dilated causal convolutions, 14 raw sensors. The reference:
-                 no attention anywhere, so everything above has to beat the
-                 cheaper and more conventional encoder.
-  transformer    swaps the conv stack for a single full-causal attention path.
+  transformer    a single full-causal attention path over the 14 raw
+                 sensors. The reference every rung above is measured from.
   near_far       + the second, local path and the content-conditioned gate
                  that mixes them, including the last block's near->far
                  cross-attention. That cross-attention belongs to the
@@ -20,9 +18,14 @@ a leave-one-out study.
                  cross-attention fusion.
   full_model     + the reverse-time encoding and the healthy-window contrast.
 
-The spectral gate is not a rung. An FFT band-energy gate was run over 5 seeds
-on both subsets, in two placements, and never moved NASA/RMSE/MAE beyond seed
-noise, so the ladder has nothing to say about it.
+Neither the TCN baseline nor the spectral gate is a rung. The convolutional
+baseline was dropped: the study is about what the attention architecture's
+components contribute, and a conv encoder differs from the transformer rungs
+in too many ways at once for the step above it to attribute anything.
+
+The spectral gate is not a rung either. An FFT band-energy gate was run over 5
+seeds on both subsets, in two placements, and never moved NASA/RMSE/MAE beyond
+seed noise, so the ladder has nothing to say about it.
 
 RUN_ORDER, not this list, decides what trains first: full_model runs first so
 the headline numbers exist early, while the paired step-by-step deltas are
@@ -34,8 +37,6 @@ renaming a rung orphans its checkpoints.
 """
 
 CONFIGS = [
-    dict(name='tcn_baseline', backbone='tcn', use_geometry=False,
-         use_sensor_branch=False, use_reverse=False, use_healthy=False),
     dict(name='transformer', backbone='far_only', use_geometry=False,
          use_sensor_branch=False, use_reverse=False, use_healthy=False),
     dict(name='near_far', backbone='both', use_geometry=False,
@@ -49,8 +50,8 @@ CONFIGS = [
 ]
 
 # Training order only. Analysis always walks CONFIGS.
-RUN_ORDER = ['full_model', 'tcn_baseline', 'transformer', 'near_far',
-             'geometry', 'sensor_branch']
+RUN_ORDER = ['full_model', 'transformer', 'near_far', 'geometry',
+             'sensor_branch']
 
 SEEDS = [53, 51, 43, 42, 3]
 

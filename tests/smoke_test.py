@@ -27,7 +27,7 @@ OUT = os.path.join(WS, 'results')
 CONFIG = 'full_model'
 # A second, cheap rung so the paired step-delta table has a pair to compare.
 # Two seeds because the deltas need >=2 shared seeds to be computable at all.
-BASELINE_CONFIG = 'tcn_baseline'
+BASELINE_CONFIG = 'transformer'
 SEEDS = [42, 43]
 SEED = SEEDS[0]
 SENSORS = ['s2', 's3', 's4', 's7', 's8', 's9', 's11', 's12',
@@ -137,9 +137,9 @@ T.run_dataset('FD001', [T.config_by_name(n) for n in ({CONFIG!r}, {BASELINE_CONF
     assert 'TEST_NASA' in out, out[-2000:]
     assert 'features: 14 sensors + 4 geometry available = 18' in out
     assert 'full_model  (18 features, geometry=True)' in out
-    # tcn_baseline trains on the 14 sensors alone: the geometry rung is above
+    # transformer trains on the 14 sensors alone: the geometry rung is above
     # it on the ladder, so a config below it must not be fed those columns.
-    assert 'tcn_baseline  (14 features, geometry=False)' in out
+    assert 'transformer  (14 features, geometry=False)' in out
     for name in (CONFIG, BASELINE_CONFIG):
         for seed in SEEDS:
             assert os.path.exists(os.path.join(OUT, 'FD001', f'{name}_seed{seed}.pt'))
