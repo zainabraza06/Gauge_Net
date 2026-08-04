@@ -82,10 +82,9 @@ class RULDataset(Dataset):
             n = len(g)
             rul = np.minimum(g['rul'].values.astype(np.float32) if 'rul' in g.columns
                              else np.zeros(n), RUL_CAP)
-            # onset / T_i / phase are deliberately NOT read here. The sample
-            # weight is now a function of capped RUL alone (model.losses
-            # .smooth_weight), so no dataset-specific column can make two
-            # subsets train on different objectives.
+            # Only the features and the capped RUL are read. There is no
+            # sample weight to carry, and no onset / T_i / phase column for
+            # one subset to have and another to lack.
             self.engines.append({
                 'feats': g[fn].values.astype(np.float32), 'rul': rul,
                 'cycle': g['cycle'].values.astype(np.float32)})

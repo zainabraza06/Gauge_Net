@@ -32,7 +32,7 @@ from model.config import (DEVICE, DATA_ROOT, OUT_ROOT, SCALE, LR, LR_MIN, WD, GR
 from model.data import load_subset
 from model.igrfnet import build_model
 from model.inference import mc_predict, predict_test_set
-from model.losses import asym_huber, smooth_weight
+from model.losses import asym_huber
 from model.metrics import nasa_score, all_metrics, ACC_THRESHOLDS
 from model.windows import RULDataset, collate, build_val_snapshots, val_engines_for_seed
 
@@ -78,8 +78,9 @@ def train_one_seed(seed, fn, tr_c, te_c, rul_true, fml, ckpt, cfg, tag=''):
             pred = model(feats, lf,
                          x_healthy=hwin if use_healthy else None,
                          lf_healthy=hlf, healthy_gate=hgate)
-            omega = smooth_weight(rul_s)
-            loss = (omega * asym_huber(pred, rul_s)).mean()
+            # Unweighted: the loss ablation preferred this to both weighted
+            # variants tried, so every row counts the same.
+            loss = asym_huber(pred, rul_s).mean()
             opt.zero_grad()
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP)
