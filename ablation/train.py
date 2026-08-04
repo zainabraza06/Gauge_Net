@@ -103,23 +103,30 @@ def train_one_seed(seed, fn, tr_c, te_c, rul_true, fml, ckpt, cfg, tag=''):
                   f"best={best_vn:.2f}  no_improve={no_imp}")
         if no_imp >= PATIENCE:
             break
-    elapsed = time.time() - t0
+    train_seconds = time.time() - t0
 
-    # Score the SELECTED checkpoint, not the final epoch's weights.
+    # Score the SELECTED checkpoint, not the final epoch's weights. Inference
+    # is timed separately from training: they answer different questions --
+    # what the study cost to run, versus what predicting one engine costs in
+    # deployment -- and a single wall-clock number conflates them.
     model.load_state_dict(torch.load(ckpt, map_location=DEVICE))
     model.eval()
-    preds, _ = predict_test_set(model, te_c, fn, fml)
+    preds, inference_seconds = predict_test_set(model, te_c, fn, fml)
     m = all_metrics(preds, rul_true)
     acc_str = "  ".join(f"Acc(+/-{k})={m[f'acc{k}']*100:.1f}%" for k in ACC_THRESHOLDS)
     print(f"  [{tag}] params={npar:,}  seed={seed}  TEST_NASA={m['nasa']:.2f}  "
-          f"RMSE={m['rmse']:.3f}  {acc_str}  best_val_NASA={best_vn:.2f}  "
-          f"epochs~{epoch}  time={elapsed / 60:.1f}min")
+          f"RMSE={m['rmse']:.3f}  MAPE={m['mape']:.1f}%  R2={m['r2']:.3f}  {acc_str}  "
+          f"best_val_NASA={best_vn:.2f}  epochs~{epoch}  "
+          f"train={train_seconds / 60:.1f}min  infer={inference_seconds / 60:.2f}min")
 
     del model
     if DEVICE == 'cuda':
         torch.cuda.empty_cache()
+    # preds ride along so the ensembling stage can combine raw predictions
+    # rather than already-reduced metrics.
     return dict(seed=seed, best_val_nasa=best_vn, n_params=npar,
-                epochs=epoch, minutes=elapsed / 60, **m)
+                epochs=epoch, train_seconds=train_seconds,
+                inference_seconds=inference_seconds, preds=preds, **m)
 
 
 def run_dataset(subset, configs, seeds, overwrite=False, data_root=None, out_root=None):
@@ -151,20 +158,31 @@ def run_dataset(subset, configs, seeds, overwrite=False, data_root=None, out_roo
             all_results[name].append(r)
             with open(os.path.join(out_dir, f'{name}_results.pkl'), 'wb') as f:
                 pickle.dump(all_results[name], f)
+            # Raw per-engine predictions, one array per seed. Written after
+            # every seed so an interrupted run still leaves the members it
+            # finished in a form the ensembling stage can combine.
+            np.savez(os.path.join(out_dir, f'{name}_preds.npz'),
+                     **{f'seed{res["seed"]}': res['preds'] for res in all_results[name]})
 
     summary = {name: dict(
         nasa_mean=float(np.mean([r['nasa'] for r in rs])),
         nasa_std=float(np.std([r['nasa'] for r in rs])),
         val_nasa_mean=float(np.mean([r['best_val_nasa'] for r in rs])),
+        train_seconds_mean=float(np.mean([r['train_seconds'] for r in rs])),
+        train_seconds_total=float(np.sum([r['train_seconds'] for r in rs])),
+        inference_seconds_mean=float(np.mean([r['inference_seconds'] for r in rs])),
         n_seeds=len(rs), n_params=rs[0]['n_params'])
         for name, rs in all_results.items() if rs}
 
     if summary:
         print(f"\n{'=' * 75}\n{subset} -- TRAINED THIS RUN\n{'=' * 75}")
-        print(f"  {'Config':<24}{'TEST_NASA mean':>16}{'std':>10}{'seeds':>8}{'params':>12}")
+        print(f"  {'Config':<24}{'TEST_NASA mean':>16}{'std':>10}{'seeds':>8}"
+              f"{'params':>12}{'train min':>12}{'infer min':>12}")
         for name, s in summary.items():
             print(f"  {name:<24}{s['nasa_mean']:>16.2f}{s['nasa_std']:>10.2f}"
-                  f"{s['n_seeds']:>8}{s['n_params']:>12,}")
+                  f"{s['n_seeds']:>8}{s['n_params']:>12,}"
+                  f"{s['train_seconds_mean'] / 60:>12.1f}"
+                  f"{s['inference_seconds_mean'] / 60:>12.2f}")
         with open(os.path.join(out_dir, f'{subset}_training_summary.json'), 'w') as f:
             json.dump(summary, f, indent=2)
     return summary
