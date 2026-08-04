@@ -27,6 +27,7 @@ from model.metrics import ACC_THRESHOLDS
 
 from .configs import CONFIGS, config_by_name
 from .ensembling import run_ensembling_suite
+from .stats import DIFF_CONVENTION, format_comparison, paired_comparison
 
 CSV_COLS = (['dataset', 'config', 'technique', 'n_members', 'n_params',
              'nasa', 'rmse', 'mae', 'mean_error', 'mape', 'r2']
@@ -43,6 +44,42 @@ def write_csv(path, rows):
     return True
 
 
+DELTA_METRICS = [('nasa', 2), ('rmse', 3), ('mae', 3)]
+
+
+def print_step_deltas(subset, configs, per_seed):
+    """Each rung against the one below it, paired on shared seeds.
+
+    Walks the configs in ladder order, whatever order they were trained in --
+    a delta between non-adjacent rungs would fold several components together
+    and could not be attributed to any of them.
+    """
+    print(f"\n{'=' * 70}\n{subset} -- STEP-BY-STEP DELTAS (each rung vs the one below, "
+          f"paired by seed)\n{'=' * 70}")
+    print(f"  sign: {DIFF_CONVENTION}")
+    print("  n=5 seeds is low-powered: Wilcoxon cannot reach p<0.05 at n=5 at all, so read")
+    print("  the effect size and whether the bootstrap interval excludes zero, not the p-values.")
+
+    for prev_cfg, cur_cfg in zip(configs, configs[1:]):
+        prev, cur = prev_cfg['name'], cur_cfg['name']
+        if prev not in per_seed or cur not in per_seed:
+            print(f"\n  {prev} -> {cur}: SKIPPED (no checkpoints for "
+                  f"{prev if prev not in per_seed else cur})")
+            continue
+        shared = sorted(set(per_seed[prev]) & set(per_seed[cur]))
+        if len(shared) < 2:
+            print(f"\n  {prev} -> {cur}: SKIPPED (needs >=2 shared seeds, found "
+                  f"{len(shared)})")
+            continue
+        d_params = (per_seed[cur][shared[0]]['n_params']
+                    - per_seed[prev][shared[0]]['n_params'])
+        print(f"\n  {prev} -> {cur}:  params {d_params:+,}  (seeds {shared})")
+        for metric, precision in DELTA_METRICS:
+            cmp_ = paired_comparison([per_seed[prev][s][metric] for s in shared],
+                                     [per_seed[cur][s][metric] for s in shared])
+            print(f"    {format_comparison(metric, cmp_, precision)}")
+
+
 def run_dataset(subset, configs, data_root=None, out_root=None):
     print(f"\n{'#' * 75}\n# DATASET = {subset}\n{'#' * 75}")
     out_dir = os.path.join(out_root or OUT_ROOT, subset)
@@ -56,6 +93,7 @@ def run_dataset(subset, configs, data_root=None, out_root=None):
 
     all_ensembles = {}
     csv_rows = []
+    per_seed = {}
     for cfg in configs:
         name = cfg['name']
         fn = features_for(cfg, traj_fn, geom_cols)
@@ -70,6 +108,11 @@ def run_dataset(subset, configs, data_root=None, out_root=None):
                                        os.path.join(out_dir, f'{name}_seed{seed}.pt'),
                                        cfg, tag=f'{subset}_{name}')
                    for seed in seeds_found]
+
+        # Keyed by seed, not positional: two rungs can have different seeds
+        # present after an interrupted run, and the delta table must pair
+        # like with like rather than by list position.
+        per_seed[name] = {r['seed']: r for r in members}
 
         indiv_nasa = np.array([r['nasa'] for r in members])
         indiv_ms = np.array([r['ms_per_engine'] for r in members])
@@ -100,6 +143,8 @@ def run_dataset(subset, configs, data_root=None, out_root=None):
                                  **{k: m[k] for k in
                                     ['nasa', 'rmse', 'mae', 'mean_error', 'mape', 'r2']},
                                  **{f'acc{k}': m[f'acc{k}'] for k in ACC_THRESHOLDS}))
+
+    print_step_deltas(subset, configs, per_seed)
 
     with open(os.path.join(out_dir, 'loaded_component_ensembles_full.json'), 'w') as f:
         json.dump(all_ensembles, f, indent=2)
