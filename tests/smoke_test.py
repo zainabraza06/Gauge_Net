@@ -164,6 +164,12 @@ E.run_dataset('FD001', [E.config_by_name(n) for n in ({BASELINE_CONFIG!r}, {CONF
     assert os.path.exists(csv)
     print("  [6] evaluate -> scored checkpoints, member-count skips correct  OK")
 
+    # Techniques are tested against the mean per ENGINE, which is where the
+    # study actually has power -- unlike the five-seed rung deltas.
+    assert "technique vs 'mean', paired per engine" in out, out[-3000:]
+    for name in (CONFIG, BASELINE_CONFIG):
+        assert os.path.exists(os.path.join(OUT, 'FD001', f'{name}_ensemble_preds.npz'))
+
     assert f'{BASELINE_CONFIG} -> {CONFIG}' in out, out[-3000:]
     assert 'boot 95% CI=' in out and 'paired-t p=' in out
     print("  [7] step deltas -> adjacent rungs paired by seed, tests reported  OK")

@@ -80,6 +80,31 @@ def print_step_deltas(subset, configs, per_seed):
             print(f"    {format_comparison(metric, cmp_, precision)}")
 
 
+def print_technique_tests(name, ens_preds, rul_true, baseline='mean'):
+    """Every ensembling technique against the plain mean, paired per ENGINE.
+
+    This is the one comparison in the study with real statistical power: the
+    pairing is over engines (~100 of them), not over the five seeds, because
+    both techniques predicted the same engines from the same members. What is
+    compared is absolute error per engine, so a positive difference means the
+    technique beat the mean.
+
+    It does NOT say a technique generalises better -- every technique here is
+    scored on the same test set, and the ones weighted by validation NASA saw
+    that signal already.
+    """
+    if baseline not in ens_preds or ens_preds[baseline] is None:
+        return
+    base_err = np.abs(ens_preds[baseline] - rul_true)
+    print(f"\n  [{name}] technique vs '{baseline}', paired per engine "
+          f"(n={len(rul_true)} engines):")
+    for technique, preds in ens_preds.items():
+        if technique == baseline or preds is None:
+            continue
+        cmp_ = paired_comparison(base_err, np.abs(preds - rul_true))
+        print(f"    {technique:<16} {format_comparison('|err|', cmp_, 3)}")
+
+
 def run_dataset(subset, configs, data_root=None, out_root=None):
     print(f"\n{'#' * 75}\n# DATASET = {subset}\n{'#' * 75}")
     out_dir = os.path.join(out_root or OUT_ROOT, subset)
@@ -143,6 +168,12 @@ def run_dataset(subset, configs, data_root=None, out_root=None):
                                  **{k: m[k] for k in
                                     ['nasa', 'rmse', 'mae', 'mean_error', 'mape', 'r2']},
                                  **{f'acc{k}': m[f'acc{k}'] for k in ACC_THRESHOLDS}))
+
+        print_technique_tests(name, ens_preds, rul_true)
+        # The combined predictions themselves, so a technique can be re-scored
+        # or re-tested later without reloading every checkpoint.
+        np.savez(os.path.join(out_dir, f'{name}_ensemble_preds.npz'),
+                 **{t: p for t, p in ens_preds.items() if p is not None})
 
     print_step_deltas(subset, configs, per_seed)
 
