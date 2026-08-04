@@ -22,7 +22,7 @@ model/             everything shared by training and evaluation
   losses.py          unweighted asymmetric Huber
   geometry.py        Riemannian / Wasserstein drift features (cached)
   windows.py         causal windowing, dataset, validation snapshots
-  modules.py         sensor gate, spectral gate, temporal blocks, pooling
+  modules.py         sensor gate, temporal blocks, pooling, healthy contrast
   igrfnet.py         the ablatable network + build_model(cfg)
   data.py            load a subset and attach geometry features
   inference.py       MC-dropout prediction, per-engine scoring, checkpoints
@@ -107,8 +107,7 @@ differ by that component alone.
 | `2_plus_sensor_gate` | cross-sensor input gating | 310,675 |
 | `3c_near_far_both` | dual near/far paths + content-conditioned mixing gate | 572,497 |
 | `4_plus_reverse` | time-reversed encoding, learned blend | 722,066 |
-| `5_plus_spectral` | frequency-content gating | 733,394 |
-| `6_plus_healthy_FINAL` | healthy-window contrast | 780,050 |
+| `6_plus_healthy_FINAL` | healthy-window contrast | 768,722 |
 
 A rung's name is its checkpoint filename prefix (`<name>_seed<seed>.pt`), so
 renaming one orphans its checkpoints.

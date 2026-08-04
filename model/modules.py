@@ -4,13 +4,19 @@ Building blocks of IGRFNet.
 Each block corresponds to one rung of the ablation ladder, so a component can
 be switched off by not constructing it rather than by branching inside the
 forward pass.
+
+There is no spectral gate here. An FFT band-energy gate on the temporal
+features was ablated over 5 seeds on both subsets, in both its original and a
+corrected placement, and moved NASA/RMSE/MAE no further than seed noise; the
+one encouraging signal, lower seed variance on FD003, did not reproduce on
+FD001. It is removed rather than kept switched off, since a component that
+never earned its place is not a rung of the ladder.
 """
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
-from .config import W, H, DROPOUT, SENSOR_GATE_DIM, SENSOR_GATE_HEADS, ATTN_HEADS, NEAR_WINDOW
+from .config import DROPOUT, SENSOR_GATE_DIM, SENSOR_GATE_HEADS, ATTN_HEADS, NEAR_WINDOW
 
 
 class SensorRelationGate(nn.Module):
@@ -41,34 +47,6 @@ class SensorRelationGate(nn.Module):
         a, _ = self.attn(v, v, v)
         v2 = self.ln(v + a)
         return x * torch.sigmoid(self.out_proj(v2).reshape(b, t, nf))
-
-
-class SpectralGate(nn.Module):
-    """Gates the temporal features by the window's frequency content.
-
-    Degradation shows up as a slow drift, whereas load changes and sensor
-    noise sit at higher frequencies. Comparing low-band energy against
-    full-band energy gives the network a cheap way to tell "this window is
-    trending" from "this window is just noisy", and that comparison is used
-    as a channel gate on the time features. Bin 0 (the DC/mean term) is
-    dropped from both bands so the gate responds to variation, not level.
-    """
-
-    def __init__(self, n_f, h_dim=H):
-        super().__init__()
-        n_low = max(1, W // 8)
-        self.low_proj = nn.Linear(n_f, h_dim // 2)
-        self.full_proj = nn.Linear(n_f, h_dim // 2)
-        self.gate_out = nn.Linear(h_dim, h_dim)
-        self.ln = nn.LayerNorm(h_dim)
-        self.n_low = n_low
-
-    def forward(self, x, h_time):
-        spec = torch.fft.rfft(x.transpose(1, 2), dim=-1).abs()
-        low_e = spec[:, :, 1:self.n_low + 1].mean(-1)
-        full_e = spec[:, :, 1:].mean(-1)
-        g = F.gelu(torch.cat([self.low_proj(low_e), self.full_proj(full_e)], dim=-1))
-        return self.ln(h_time * torch.sigmoid(self.gate_out(g)).unsqueeze(1) + h_time)
 
 
 class AttentionPooling(nn.Module):

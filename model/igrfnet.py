@@ -11,19 +11,18 @@ import torch
 import torch.nn as nn
 
 from .config import H, W, DROPOUT, NEAR_WINDOW, DEVICE
-from .modules import (SensorRelationGate, SpectralGate, AttentionPooling,
-                      HealthyCrossAttentionPool, TemporalBlock, ReverseTransformerBlock)
+from .modules import (SensorRelationGate, AttentionPooling, HealthyCrossAttentionPool,
+                      TemporalBlock, ReverseTransformerBlock)
 
 
 class IGRFNet(nn.Module):
     def __init__(self, n_f, fml, h_dim=H, use_sensor_gate=True, path_mode='both',
-                 use_reverse=True, use_spectral=True, use_healthy=True):
+                 use_reverse=True, use_healthy=True):
         super().__init__()
         self.fml = fml
         self.h_dim = h_dim
         self.use_sensor_gate = use_sensor_gate
         self.use_reverse = use_reverse
-        self.use_spectral = use_spectral
         self.use_healthy = use_healthy
         gate_dim = 4     # see _gate_ctx
 
@@ -42,7 +41,6 @@ class IGRFNet(nn.Module):
         # contribution and the blend is learned from there.
         self.rev_blend = nn.Parameter(torch.tensor(-0.847)) if use_reverse else None
 
-        self.sgate = SpectralGate(n_f, h_dim=h_dim) if use_spectral else None
         self.pos = nn.Parameter(torch.zeros(1, W, h_dim))
         nn.init.trunc_normal_(self.pos, std=0.02)
         self.attn = nn.MultiheadAttention(h_dim, 2, dropout=DROPOUT, batch_first=True)
@@ -81,7 +79,7 @@ class IGRFNet(nn.Module):
             alpha = torch.sigmoid(self.rev_blend)
             h1 = (1. - alpha) * h1 + alpha * h_rev
 
-        hm = self.sgate(x_gated, h1) if self.use_spectral else h1
+        hm = h1
         pos = self.pos[:, :hm.shape[1], :]
         ha, _ = self.attn(hm + pos, hm + pos, hm + pos)
         return self.aln(ha + hm)
@@ -118,5 +116,5 @@ def build_model(n_features, fml, cfg, device=DEVICE):
     """
     return IGRFNet(n_features, fml, h_dim=H,
                    use_sensor_gate=cfg['use_sensor_gate'], path_mode=cfg['path_mode'],
-                   use_reverse=cfg['use_reverse'], use_spectral=cfg['use_spectral'],
+                   use_reverse=cfg['use_reverse'],
                    use_healthy=cfg['use_healthy']).to(device)
