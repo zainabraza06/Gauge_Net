@@ -42,8 +42,11 @@ no kink at the onset boundary. This class of silent mismatch cannot recur,
 because there is no dataset-specific column left for the weighting to depend
 on.
 
-onset/T_i/phase are still emitted by BOTH subsets, for inspection and
-plotting. They no longer drive anything.
+onset/T_i/phase are no longer emitted at all. They stopped driving anything
+when the weighting became RUL-only, and a dead column that still looks like a
+label is worse than no column: it invites a downstream reader to pick it up
+again and reintroduce exactly the per-dataset mismatch described above. The
+verification step now asserts the emitted schema is closed.
 """
 
 import os
@@ -134,21 +137,13 @@ def build(subset, data_dir, output_dir):
     n_short = int((tr_raw.groupby('unit')['cycle'].max() < RUL_CAP).sum())
     print(f"\n  rul = min(rul_true, {RUL_CAP})  |  engines shorter than the cap: {n_short}")
 
-    # ── 4. onset / T_i / phase -- diagnostic only ──
-    T_i = tr_traj.groupby('unit')['cycle'].transform('max').astype(np.float32)
-    tr_traj['T_i'] = T_i.values.astype(np.float32)
-    tr_traj['onset'] = np.maximum(0.0, T_i.values - RUL_CAP).astype(np.float32)
-    tr_traj['phase'] = (tr_traj['cycle'].values >= tr_traj['onset'].values).astype(np.float32)
-    print(f"  onset = max(0, T_i - {RUL_CAP}), phase = cycle >= onset "
-          f"(emitted for inspection; NOT the weighting driver)")
-
-    # ── 5. sample weight ──
+    # ── 4. sample weight ──
     tr_traj['sample_weight'] = smooth_weight(tr_traj['rul'].values)
     print(f"  sample_weight range: [{tr_traj['sample_weight'].min():.2f}, "
           f"{tr_traj['sample_weight'].max():.2f}]  "
           f"(1.0 at RUL>={RUL_CAP:.0f}, {1 + W_MAX:.1f} at failure)")
 
-    # ── 6. assemble ──
+    # ── 5. assemble ──
     train_feat = tr_traj.copy()
     test_feat = te_traj.copy()
     feature_cols = list(SELECTED)
@@ -224,10 +219,13 @@ def verify(train_feat, test_feat, feature_cols, base_feature_names, single_condi
     if not w_ok:
         issues.append('sample_weight range off expected bounds')
 
-    onset_ok = bool((train_feat['onset'].values <= train_feat['T_i'].values).all())
-    print(f"  onset <= T_i for every row: {onset_ok}  {'OK' if onset_ok else 'FAIL'}")
-    if not onset_ok:
-        issues.append('onset exceeds T_i for some row')
+    # The emitted schema is now closed: anything beyond these columns means a
+    # dead column has crept back in and downstream feature counts can drift.
+    expected = {'unit', 'cycle', 'rul_true', 'rul', 'sample_weight'} | set(SELECTED)
+    extra = set(train_feat.columns) - expected
+    print(f"  no onset/T_i/phase columns emitted: {not extra}  {'OK' if not extra else f'FAIL {extra}'}")
+    if extra:
+        issues.append(f'unexpected columns emitted: {sorted(extra)}')
 
     no_baseline = len(base_feature_names) == 0
     print(f"  baseline features removed: {no_baseline}  {'OK' if no_baseline else 'FAIL'}")
