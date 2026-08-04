@@ -74,6 +74,9 @@ LAST_K = 9
 SENSOR_BRANCH_DIM = 32; SENSOR_BRANCH_HEADS = 4; SENSOR_BRANCH_LAYERS = 2
 ATTN_HEADS = 2
 NEAR_WINDOW = 8       # local attention span of the near path
+# TCN reference backbone: 3 dilated causal conv layers (dilation 1, 2, 4),
+# kernel 3 -> receptive field 15 cycles.
+TCN_LAYERS = 3; TCN_KERNEL = 3
 
 DATASETS = ['FD001', 'FD003']
 

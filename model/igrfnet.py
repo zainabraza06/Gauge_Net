@@ -12,16 +12,18 @@ import torch.nn as nn
 
 from .config import H, W, DROPOUT, NEAR_WINDOW, DEVICE
 from .modules import (SensorRelationshipBranch, CrossAttentionFusion, AttentionPooling,
-                      HealthyCrossAttentionPool, TemporalBlock, ReverseTransformerBlock)
+                      HealthyCrossAttentionPool, TemporalBlock, ReverseTransformerBlock,
+                      TCNBackbone)
 
 
 class IGRFNet(nn.Module):
-    def __init__(self, n_f, fml, h_dim=H, use_sensor_branch=True, path_mode='both',
+    def __init__(self, n_f, fml, h_dim=H, use_sensor_branch=True, backbone='both',
                  use_reverse=True, use_healthy=True):
         super().__init__()
         self.fml = fml
         self.h_dim = h_dim
         self.use_sensor_branch = use_sensor_branch
+        self.backbone = backbone
         self.use_reverse = use_reverse
         self.use_healthy = use_healthy
         gate_dim = 4     # see _gate_ctx
@@ -33,12 +35,19 @@ class IGRFNet(nn.Module):
         self.cross_fusion = CrossAttentionFusion(h_dim * 2) if use_sensor_branch else None
         self.proj = nn.Sequential(nn.Linear(n_f, h_dim), nn.LayerNorm(h_dim), nn.GELU())
 
-        # Only the last block cross-attends near to far: the first two build
-        # the two views, the last one lets them interact before pooling.
-        self.blocks = nn.ModuleList([
-            TemporalBlock(h_dim, gate_dim, path_mode, NEAR_WINDOW, False),
-            TemporalBlock(h_dim, gate_dim, path_mode, NEAR_WINDOW, False),
-            TemporalBlock(h_dim, gate_dim, path_mode, NEAR_WINDOW, True)])
+        # The bottom rung swaps the whole attention stack for a dilated
+        # causal conv stack; the attention rungs keep three blocks, and only
+        # the last cross-attends near to far, so the first two build the two
+        # views and the last lets them interact before pooling.
+        if backbone == 'tcn':
+            self.tcn = TCNBackbone(h_dim)
+            self.blocks = None
+        else:
+            self.tcn = None
+            self.blocks = nn.ModuleList([
+                TemporalBlock(h_dim, gate_dim, backbone, NEAR_WINDOW, False),
+                TemporalBlock(h_dim, gate_dim, backbone, NEAR_WINDOW, False),
+                TemporalBlock(h_dim, gate_dim, backbone, NEAR_WINDOW, True)])
 
         self.rev_backbone = ReverseTransformerBlock(h_dim) if use_reverse else None
         # sigmoid(-0.847) ~ 0.30: the reverse view starts as a minority
@@ -74,8 +83,11 @@ class IGRFNet(nn.Module):
     def _encode(self, x, lf):
         ctx = self._gate_ctx(x, lf)
         h1 = self.proj(x)
-        for b in self.blocks:
-            h1 = b(h1, ctx)
+        if self.backbone == 'tcn':
+            h1 = self.tcn(h1)
+        else:
+            for b in self.blocks:
+                h1 = b(h1, ctx)
 
         if self.use_reverse:
             h_rev = self.rev_backbone(self.proj(x.flip(1)))
@@ -120,6 +132,6 @@ def build_model(n_features, fml, cfg, device=DEVICE):
     architectures for the same config name.
     """
     return IGRFNet(n_features, fml, h_dim=H,
-                   use_sensor_branch=cfg['use_sensor_branch'], path_mode=cfg['path_mode'],
+                   use_sensor_branch=cfg['use_sensor_branch'], backbone=cfg['backbone'],
                    use_reverse=cfg['use_reverse'],
                    use_healthy=cfg['use_healthy']).to(device)
