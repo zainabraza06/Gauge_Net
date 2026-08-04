@@ -120,7 +120,7 @@ def run_dataset(subset, configs, data_root=None, out_root=None):
               f"std={indiv_nasa.std():.2f}  inference mean={indiv_ms.mean():.1f}ms/engine  "
               f"(n={len(members)}, params={members[0]['n_params']:,})")
 
-        ens, skips = run_ensembling_suite(members, rul_true)
+        ens, skips, ens_preds = run_ensembling_suite(members, rul_true)
 
         all_ensembles[name] = dict(
             n_members=len(members), seeds_found=seeds_found,

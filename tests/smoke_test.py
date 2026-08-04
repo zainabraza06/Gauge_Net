@@ -157,9 +157,9 @@ E.run_dataset('FD001', [E.config_by_name(n) for n in ({BASELINE_CONFIG!r}, {CONF
 """)
     out = run([eval_stub])
     assert f'found seeds: {SEEDS}' in out, out[-2000:]
-    # Two members: best_k_mean needs three, so it must skip WITH a reason,
+    # Two members: trimmed_mean needs three, so it must skip WITH a reason,
     # while rank_average now has enough members to be computed.
-    assert 'best_k_mean     : SKIPPED (needs >=3 members' in out
+    assert 'trimmed_mean    : SKIPPED (needs >=3 members' in out
     csv = os.path.join(OUT, 'FD001', 'FD001_full_metrics_table.csv')
     assert os.path.exists(csv)
     print("  [6] evaluate -> scored checkpoints, member-count skips correct  OK")
