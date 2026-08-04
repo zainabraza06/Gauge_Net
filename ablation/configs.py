@@ -7,7 +7,7 @@ removed on the way up, which is what makes the ladder cumulative rather than
 a leave-one-out study.
 
   1_backbone_only        single full-causal transformer path. The reference.
-  2_plus_sensor_gate     + cross-sensor input gating
+  2_plus_sensor_branch   + the cross-sensor (iTransformer) branch
   3c_near_far_both       + the dual near/far paths with a content-conditioned
                            mixing gate (replaces the single path)
   4_plus_reverse         + the time-reversed encoding, learned blend
@@ -23,15 +23,15 @@ The rung name is also the checkpoint filename prefix
 """
 
 CONFIGS = [
-    dict(name='1_backbone_only', use_sensor_gate=False, path_mode='backbone',
+    dict(name='1_backbone_only', use_sensor_branch=False, path_mode='backbone',
          use_reverse=False, use_healthy=False),
-    dict(name='2_plus_sensor_gate', use_sensor_gate=True, path_mode='backbone',
+    dict(name='2_plus_sensor_branch', use_sensor_branch=True, path_mode='backbone',
          use_reverse=False, use_healthy=False),
-    dict(name='3c_near_far_both', use_sensor_gate=True, path_mode='both',
+    dict(name='3c_near_far_both', use_sensor_branch=True, path_mode='both',
          use_reverse=False, use_healthy=False),
-    dict(name='4_plus_reverse', use_sensor_gate=True, path_mode='both',
+    dict(name='4_plus_reverse', use_sensor_branch=True, path_mode='both',
          use_reverse=True, use_healthy=False),
-    dict(name='6_plus_healthy_FINAL', use_sensor_gate=True, path_mode='both',
+    dict(name='6_plus_healthy_FINAL', use_sensor_branch=True, path_mode='both',
          use_reverse=True, use_healthy=True),
 ]
 

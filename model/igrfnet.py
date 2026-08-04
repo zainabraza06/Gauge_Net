@@ -11,22 +11,26 @@ import torch
 import torch.nn as nn
 
 from .config import H, W, DROPOUT, NEAR_WINDOW, DEVICE
-from .modules import (SensorRelationGate, AttentionPooling, HealthyCrossAttentionPool,
-                      TemporalBlock, ReverseTransformerBlock)
+from .modules import (SensorRelationshipBranch, CrossAttentionFusion, AttentionPooling,
+                      HealthyCrossAttentionPool, TemporalBlock, ReverseTransformerBlock)
 
 
 class IGRFNet(nn.Module):
-    def __init__(self, n_f, fml, h_dim=H, use_sensor_gate=True, path_mode='both',
+    def __init__(self, n_f, fml, h_dim=H, use_sensor_branch=True, path_mode='both',
                  use_reverse=True, use_healthy=True):
         super().__init__()
         self.fml = fml
         self.h_dim = h_dim
-        self.use_sensor_gate = use_sensor_gate
+        self.use_sensor_branch = use_sensor_branch
         self.use_reverse = use_reverse
         self.use_healthy = use_healthy
         gate_dim = 4     # see _gate_ctx
 
-        self.sensor_gate = SensorRelationGate(n_f) if use_sensor_gate else None
+        # The branch reads the raw window, not the projected one, and its
+        # output is fused into the POOLED temporal feature -- which is why the
+        # fusion is built at h_dim*2, the width AttentionPooling emits.
+        self.sensor_branch = SensorRelationshipBranch(n_f) if use_sensor_branch else None
+        self.cross_fusion = CrossAttentionFusion(h_dim * 2) if use_sensor_branch else None
         self.proj = nn.Sequential(nn.Linear(n_f, h_dim), nn.LayerNorm(h_dim), nn.GELU())
 
         # Only the last block cross-attends near to far: the first two build
@@ -68,14 +72,13 @@ class IGRFNet(nn.Module):
                             x.std(dim=-1).mean(1), lf], dim=-1)
 
     def _encode(self, x, lf):
-        x_gated = self.sensor_gate(x) if self.use_sensor_gate else x
-        ctx = self._gate_ctx(x_gated, lf)
-        h1 = self.proj(x_gated)
+        ctx = self._gate_ctx(x, lf)
+        h1 = self.proj(x)
         for b in self.blocks:
             h1 = b(h1, ctx)
 
         if self.use_reverse:
-            h_rev = self.rev_backbone(self.proj(x_gated.flip(1)))
+            h_rev = self.rev_backbone(self.proj(x.flip(1)))
             alpha = torch.sigmoid(self.rev_blend)
             h1 = (1. - alpha) * h1 + alpha * h_rev
 
@@ -87,6 +90,8 @@ class IGRFNet(nn.Module):
     def forward(self, x, lf, x_healthy=None, lf_healthy=None, healthy_gate=None):
         hm = self._encode(x, lf)
         feat_main = self.attn_pool(hm)
+        if self.use_sensor_branch:
+            feat_main = self.cross_fusion(feat_main, self.sensor_branch(x))
         if self.use_healthy and x_healthy is None:
             # The head was sized for the healthy contrast, so falling back to
             # the main features alone would fail deep inside nn.Linear with an
@@ -115,6 +120,6 @@ def build_model(n_features, fml, cfg, device=DEVICE):
     architectures for the same config name.
     """
     return IGRFNet(n_features, fml, h_dim=H,
-                   use_sensor_gate=cfg['use_sensor_gate'], path_mode=cfg['path_mode'],
+                   use_sensor_branch=cfg['use_sensor_branch'], path_mode=cfg['path_mode'],
                    use_reverse=cfg['use_reverse'],
                    use_healthy=cfg['use_healthy']).to(device)

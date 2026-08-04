@@ -16,37 +16,73 @@ never earned its place is not a rung of the ladder.
 import torch
 import torch.nn as nn
 
-from .config import DROPOUT, SENSOR_GATE_DIM, SENSOR_GATE_HEADS, ATTN_HEADS, NEAR_WINDOW
+from .config import (W, DROPOUT, SENSOR_BRANCH_DIM, SENSOR_BRANCH_HEADS,
+                     SENSOR_BRANCH_LAYERS, ATTN_HEADS, NEAR_WINDOW)
 
 
-class SensorRelationGate(nn.Module):
-    """Per-timestep attention ACROSS sensors, used to gate the inputs.
+class SensorRelationshipBranch(nn.Module):
+    """A separate branch that attends ACROSS sensors, iTransformer-style.
 
-    Each sensor's scalar reading is embedded, given a learned channel
-    identity, and attended against the other sensors at that same timestep;
-    the result is squashed to a multiplicative gate in [0, 1]. So a sensor is
-    amplified or suppressed according to what the other sensors read at that
-    moment, which is what lets the network discount a channel that is noisy
-    or uninformative in the current operating state. Attention is over the
-    sensor axis only -- no information moves along time here.
+    The inversion is the point: a token is not a timestep but a SENSOR, formed
+    by projecting that sensor's entire causal window at once. So every token
+    already encodes a trend before any cross-sensor comparison happens, and
+    the attention is asking which sensors are drifting together, not which
+    readings co-occur at one instant.
+
+    This replaced an inline gate that embedded one timestep's scalar readings
+    and squashed the result to a multiplicative mask. That gate could only
+    ever see a single instant, so it could not represent "these two sensors
+    are drifting together" at all. Its output is left as tokens for
+    CrossAttentionFusion rather than pooled here.
     """
 
-    def __init__(self, n_f, d_model=SENSOR_GATE_DIM, n_heads=SENSOR_GATE_HEADS):
+    def __init__(self, n_f, window_len=W, d_model=SENSOR_BRANCH_DIM,
+                 n_heads=SENSOR_BRANCH_HEADS, n_layers=SENSOR_BRANCH_LAYERS):
         super().__init__()
-        self.value_proj = nn.Linear(1, d_model)
-        self.channel_embed = nn.Parameter(torch.zeros(1, n_f, d_model))
-        nn.init.trunc_normal_(self.channel_embed, std=0.02)
-        self.attn = nn.MultiheadAttention(d_model, n_heads, dropout=DROPOUT, batch_first=True)
-        self.ln = nn.LayerNorm(d_model)
-        self.out_proj = nn.Linear(d_model, 1)
+        self.token_embed = nn.Linear(window_len, d_model)
+        self.sensor_id_embed = nn.Parameter(torch.zeros(1, n_f, d_model))
+        nn.init.trunc_normal_(self.sensor_id_embed, std=0.02)
+        self.layers = nn.ModuleList([
+            nn.ModuleDict(dict(
+                attn=nn.MultiheadAttention(d_model, n_heads, dropout=DROPOUT, batch_first=True),
+                ln1=nn.LayerNorm(d_model),
+                ff=nn.Sequential(nn.Linear(d_model, d_model * 2), nn.GELU(),
+                                 nn.Dropout(DROPOUT), nn.Linear(d_model * 2, d_model)),
+                ln2=nn.LayerNorm(d_model),
+            )) for _ in range(n_layers)])
+        self.d_model = d_model
 
     def forward(self, x):
-        b, t, nf = x.shape
-        xr = x.reshape(b * t, nf, 1)
-        v = self.value_proj(xr) + self.channel_embed
-        a, _ = self.attn(v, v, v)
-        v2 = self.ln(v + a)
-        return x * torch.sigmoid(self.out_proj(v2).reshape(b, t, nf))
+        """(batch, window, n_f) -> (batch, n_f, d_model)."""
+        tokens = x.transpose(1, 2)                                  # the inversion
+        h = self.token_embed(tokens) + self.sensor_id_embed
+        for layer in self.layers:
+            a, _ = layer['attn'](h, h, h)
+            h = layer['ln1'](h + a)
+            h = layer['ln2'](h + layer['ff'](h))
+        return h
+
+
+class CrossAttentionFusion(nn.Module):
+    """Folds the sensor tokens into the pooled temporal feature.
+
+    The temporal feature is the query and the sensor tokens are key/value, so
+    the temporal representation asks which sensor relationships are relevant
+    to it, and the fused vector keeps the temporal branch's width. Confirmed
+    better than concatenating the two branches, which forces the head to
+    weigh them with fixed parameters instead.
+    """
+
+    def __init__(self, h_dim, sensor_d_model=SENSOR_BRANCH_DIM, n_heads=2):
+        super().__init__()
+        self.kv_proj = nn.Linear(sensor_d_model, h_dim)
+        self.cross_attn = nn.MultiheadAttention(h_dim, n_heads, dropout=DROPOUT, batch_first=True)
+        self.ln = nn.LayerNorm(h_dim)
+
+    def forward(self, main_feat, sensor_tokens):
+        kv = self.kv_proj(sensor_tokens)
+        fused, _ = self.cross_attn(main_feat.unsqueeze(1), kv, kv)
+        return self.ln(fused.squeeze(1) + main_feat)
 
 
 class AttentionPooling(nn.Module):
