@@ -31,7 +31,7 @@ tests/
   smoke_test.py      end-to-end run on synthetic data, no NASA archive needed
 
 ablation/          the study itself
-  configs.py         the six-rung cumulative ladder
+  configs.py         the six-rung cumulative ladder + training run order
   train.py           python -m ablation.train
   ensembling.py      eight ways of combining a config's seeds
   evaluate.py        python -m ablation.evaluate
@@ -82,8 +82,8 @@ python tests/smoke_test.py
 sanity-check the pipeline on CPU first, run one rung with one seed:
 
 ```bash
-python -m ablation.train --datasets FD001 --configs 6_plus_healthy_FINAL --seeds 42
-python -m ablation.evaluate --datasets FD001 --configs 6_plus_healthy_FINAL
+python -m ablation.train --datasets FD001 --configs full_model --seeds 53
+python -m ablation.evaluate --datasets FD001 --configs full_model
 ```
 
 The first run of a dataset also computes the geometry features, which takes
@@ -101,13 +101,14 @@ as far as it got.
 Each rung adds **one** component to the rung above, so any two adjacent rows
 differ by that component alone.
 
-| Rung | Adds | Params (18 features) |
-|---|---|---|
-| `1_backbone_only` | single full-causal transformer path | 309,218 |
-| `2_plus_sensor_branch` | cross-sensor (iTransformer) branch, cross-attention fusion | 484,162 |
-| `3c_near_far_both` | dual near/far paths + content-conditioned mixing gate | 745,984 |
-| `4_plus_reverse` | time-reversed encoding, learned blend | 895,553 |
-| `6_plus_healthy_FINAL` | healthy-window contrast | 942,209 |
+| Rung | Adds | Features | Params |
+|---|---|---|---|
+| `tcn_baseline` | dilated causal convolutions, no attention | 14 | 140,354 |
+| `transformer` | single full-causal attention path | 14 | 308,834 |
+| `near_far` | local path + content-conditioned mixing gate (+ near→far cross-attention) | 14 | 570,656 |
+| `geometry` | Riemannian / Wasserstein drift features | 18 | 571,040 |
+| `sensor_branch` | iTransformer cross-sensor branch + cross-attention fusion | 18 | 745,984 |
+| `full_model` | reverse-time encoding + healthy-window contrast | 18 | 942,209 |
 
 A rung's name is its checkpoint filename prefix (`<name>_seed<seed>.pt`), so
 renaming one orphans its checkpoints.

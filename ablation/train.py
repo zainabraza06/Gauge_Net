@@ -36,7 +36,7 @@ from model.losses import asym_huber
 from model.metrics import nasa_score, all_metrics, ACC_THRESHOLDS
 from model.windows import RULDataset, collate, build_val_snapshots, val_engines_for_seed
 
-from .configs import CONFIGS, SEEDS, config_by_name
+from .configs import CONFIGS, SEEDS, config_by_name, configs_in_run_order
 
 
 def train_one_seed(seed, fn, tr_c, te_c, rul_true, fml, ckpt, cfg, tag=''):
@@ -133,7 +133,8 @@ def run_dataset(subset, configs, seeds, overwrite=False, data_root=None, out_roo
           f"|  test engines: {te_c['unit'].nunique()}")
 
     all_results = {}
-    for cfg in configs:
+    # Trained full-model-first; the analysis stages always walk CONFIGS order.
+    for cfg in configs_in_run_order(configs):
         name = cfg['name']
         fn = features_for(cfg, traj_fn, geom_cols)
         print(f"\n{'=' * 70}\nCONFIG = {name}  ({len(fn)} features, "
