@@ -25,28 +25,24 @@ performs a per-engine offset comparison, learned and dynamic, and a static
 subtracted baseline either duplicates or fights it. The feature set drops
 from 32 to 18.
 
-WEIGHTING UNIFIED (FD001 v2 / FD003 v5)
----------------------------------------
-Previously FD001 emitted onset/T_i/phase and FD003 did not, and the trainer's
-phase weight silently falls back to onset=0, T_i=engine length, phase=1 when
-they are missing. So FD001 ramped the sample weight only across the post-onset
-degradation window while FD003 ramped it across the ENTIRE trajectory,
-including the healthy region -- two different objectives from code that looked
-dataset-agnostic.
+SAMPLE WEIGHTING REMOVED
+------------------------
+Weighting went through two rounds. The first fixed a real bug: FD001 emitted
+onset/T_i/phase and FD003 did not, the trainer silently substituted onset=0,
+phase=1 when they were absent, and the two subsets ended up trained on
+different objectives from code that looked dataset-agnostic. The fix made the
+weight a function of capped RUL alone.
 
-Rather than patch FD003 to emit the columns, the weighting no longer depends
-on them: smooth_weight is a function of capped RUL alone, which both subsets
-already compute identically. A row with true RUL >= RUL_CAP gets weight 1.0
-exactly as before; below the cap the weight rises smoothly to 1 + W_MAX with
-no kink at the onset boundary. This class of silent mismatch cannot recur,
-because there is no dataset-specific column left for the weighting to depend
-on.
+The second round ablated that unified weight against a plain UNWEIGHTED
+asymmetric Huber, and unweighted won -- as did unweighted against
+asym_plus_nasa_surrogate. So there is no weight to emit: no sample_weight
+column, and no onset/T_i/phase either, since those only ever existed to feed
+a phase weight that no longer exists.
 
-onset/T_i/phase are no longer emitted at all. They stopped driving anything
-when the weighting became RUL-only, and a dead column that still looks like a
-label is worse than no column: it invites a downstream reader to pick it up
-again and reintroduce exactly the per-dataset mismatch described above. The
-verification step now asserts the emitted schema is closed.
+What is left is exactly the two things the model consumes: 14 z-scored
+trajectory features and the capped RUL label. Verification asserts that
+schema is closed, so a dead column cannot creep back in and shift a
+downstream feature count.
 """
 
 import os
@@ -67,8 +63,6 @@ SELECTED = ['s2', 's3', 's4', 's7', 's8', 's9', 's11', 's12',
             's13', 's14', 's15', 's17', 's20', 's21']
 
 RUL_CAP = 125.0
-W_MAX = 3.0      # weight at failure is 1 + W_MAX
-GAMMA = 2.0      # curvature of the ramp; >1 concentrates weight near failure
 
 VERSION = {'FD001': 'v2', 'FD003': 'v5'}
 
@@ -77,29 +71,11 @@ def read_raw(data_dir, name):
     return pd.read_csv(os.path.join(data_dir, name), sep=r'\s+', header=None, names=COLS)
 
 
-def smooth_weight(rul_capped, rul_cap=RUL_CAP, w_max=W_MAX, gamma=GAMMA):
-    """Sample weight from capped RUL alone.
-
-    Identical and identically computable for every subset -- no onset, T_i or
-    phase dependency, which is what makes a per-dataset weighting mismatch
-    impossible. Any row still at or above the cap has
-    frac_into_degradation = 0 and weight exactly 1.0; below the cap the weight
-    rises smoothly toward 1 + w_max as RUL -> 0.
-
-    Because it is a function of the CAPPED RUL, every row above the cap
-    receives the same minimum weight. That is deliberate -- those rows are
-    equally uninformative about imminent failure -- but it does mean this is
-    capped-RUL weighting, not true-distance-to-failure weighting.
-    """
-    frac = np.clip(1.0 - (rul_capped / rul_cap), 0.0, 1.0)
-    return 1.0 + w_max * (frac ** gamma)
-
-
 def build(subset, data_dir, output_dir):
     print("=" * 70)
-    print(f"{subset} PREPROCESSING {VERSION.get(subset, '')} -- no baseline features, "
-          f"smooth unified weighting")
-    print(f"RUL_CAP={RUL_CAP}  W_MAX={W_MAX}  GAMMA={GAMMA}  sensors={len(SELECTED)}")
+    print(f"{subset} PREPROCESSING {VERSION.get(subset, '')} -- trajectory + RUL only, "
+          f"no baseline features, no sample weighting")
+    print(f"RUL_CAP={RUL_CAP}  sensors={len(SELECTED)}")
     print("=" * 70)
 
     # ── 1. load ──
@@ -137,13 +113,10 @@ def build(subset, data_dir, output_dir):
     n_short = int((tr_raw.groupby('unit')['cycle'].max() < RUL_CAP).sum())
     print(f"\n  rul = min(rul_true, {RUL_CAP})  |  engines shorter than the cap: {n_short}")
 
-    # ── 4. sample weight ──
-    tr_traj['sample_weight'] = smooth_weight(tr_traj['rul'].values)
-    print(f"  sample_weight range: [{tr_traj['sample_weight'].min():.2f}, "
-          f"{tr_traj['sample_weight'].max():.2f}]  "
-          f"(1.0 at RUL>={RUL_CAP:.0f}, {1 + W_MAX:.1f} at failure)")
+    print("  no sample_weight: the unified RUL-only weight lost to plain "
+          "unweighted asym_huber in the loss ablation")
 
-    # ── 5. assemble ──
+    # ── 4. assemble ──
     train_feat = tr_traj.copy()
     test_feat = te_traj.copy()
     feature_cols = list(SELECTED)
@@ -158,9 +131,8 @@ def build(subset, data_dir, output_dir):
         # with loaders that concatenate trajectory + baseline + geometry.
         'baseline_feature_names': {subset: []},
         'feature_data': {subset: {'train': train_feat, 'test': test_feat}},
-        'weighting_config': {'w_max': W_MAX, 'gamma': GAMMA, 'rul_cap': RUL_CAP,
-                             'scheme': 'smooth_weight (unified, rul-only, '
-                                       'no onset/phase dependency)'},
+        'weighting_config': {'rul_cap': RUL_CAP,
+                             'scheme': 'none -- unweighted asym_huber'},
         'asymmetric_loss_config': {'h1': 13.0, 'h2': 10.0},
         'normalization_stats': {subset: {
             'trajectory_mu': mu_g, 'trajectory_sig': sig_g,
@@ -197,33 +169,11 @@ def verify(train_feat, test_feat, feature_cols, base_feature_names, single_condi
     if rmax > RUL_CAP:
         issues.append('RUL cap violated')
 
-    # Check the weight FUNCTION's mathematical properties over the whole
-    # range, not just that the realised column happens to come out sorted.
-    probe = smooth_weight(np.linspace(0, RUL_CAP, 500))
-    monotonic = bool(np.all(np.diff(probe) <= 1e-12))
-    # Second difference bounded => no slope discontinuity, which is exactly
-    # what the old phase step function had at the onset boundary.
-    smooth = bool(np.all(np.abs(np.diff(probe, n=2)) < 1.0))
-    print(f"  weight function non-increasing in rul: {monotonic}  {'OK' if monotonic else 'FAIL'}")
-    print(f"  weight function smooth (no slope kink): {smooth}  {'OK' if smooth else 'FAIL'}")
-    if not monotonic:
-        issues.append('sample_weight not monotonic')
-    if not smooth:
-        issues.append('sample_weight has a slope discontinuity')
-
-    wmin = float(train_feat['sample_weight'].min())
-    wmax = float(train_feat['sample_weight'].max())
-    w_ok = bool(np.isclose(wmin, 1.0, atol=0.05) and np.isclose(wmax, 1 + W_MAX, atol=0.05))
-    print(f"  sample_weight range: [{wmin:.2f}, {wmax:.2f}] "
-          f"expected [1.00, {1 + W_MAX:.2f}]  {'OK' if w_ok else 'FAIL'}")
-    if not w_ok:
-        issues.append('sample_weight range off expected bounds')
-
     # The emitted schema is now closed: anything beyond these columns means a
     # dead column has crept back in and downstream feature counts can drift.
-    expected = {'unit', 'cycle', 'rul_true', 'rul', 'sample_weight'} | set(SELECTED)
+    expected = {'unit', 'cycle', 'rul_true', 'rul'} | set(SELECTED)
     extra = set(train_feat.columns) - expected
-    print(f"  no onset/T_i/phase columns emitted: {not extra}  {'OK' if not extra else f'FAIL {extra}'}")
+    print(f"  emits trajectory + RUL only: {not extra}  {'OK' if not extra else f'FAIL {extra}'}")
     if extra:
         issues.append(f'unexpected columns emitted: {sorted(extra)}')
 
