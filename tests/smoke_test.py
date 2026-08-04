@@ -131,7 +131,8 @@ T.run_dataset('FD001', [T.config_by_name({CONFIG!r})], [{SEED}],
 """)
     out = run([train_stub])
     assert 'TEST_NASA' in out, out[-2000:]
-    assert 'features: 14 sensors + 0 baseline + 4 geometry = 18' in out
+    assert 'features: 14 sensors + 4 geometry available = 18' in out
+    assert 'full_model  (18 features, geometry=True)' in out
     assert os.path.exists(os.path.join(OUT, 'FD001', f'{CONFIG}_seed{SEED}.pt'))
     print("  [4] training -> checkpoint written, 18 features confirmed  OK")
 
