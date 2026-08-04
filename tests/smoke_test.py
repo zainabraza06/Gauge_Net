@@ -104,8 +104,8 @@ def main():
     out = run(['-m', 'preprocessing', 'FD001', '--data-root', DATA])
     assert 'ALL CHECKS PASSED' in out, out[-2000:]
     assert '14 trajectory features, 0 baseline features' in out
-    assert os.path.exists(os.path.join(DATA, 'pipeline_output', 'output_FD001_v2.pkl'))
-    print("  [2] preprocessing -> output_FD001_v2.pkl, verification passed  OK")
+    assert os.path.exists(os.path.join(DATA, 'pipeline_output', 'output_FD001_final.pkl'))
+    print("  [2] preprocessing -> output_FD001_final.pkl, verification passed  OK")
 
     if not os.path.isdir(os.path.join(OUT, 'FD001')):
         out = run(['-m', 'ablation.evaluate', '--datasets', 'FD001',

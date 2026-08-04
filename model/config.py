@@ -80,8 +80,9 @@ NEAR_WINDOW = 8       # local attention span of the near path
 DATASETS = ['FD001', 'FD003']
 
 # Preprocessed input produced by the preprocessing package, per subset.
-# v2/v5 = no baseline features, unified smooth weighting.
-PIPELINE_VERSION = {'FD001': 'v2', 'FD003': 'v5'}
+# 'final' = no baseline features, no weighting: trajectory + capped RUL only.
+# Must match preprocessing.pipeline.VERSION, which names the file written.
+PIPELINE_VERSION = {'FD001': 'final', 'FD003': 'final'}
 
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False

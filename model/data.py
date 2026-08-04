@@ -64,14 +64,14 @@ def load_subset(subset, cache_dir=None, data_root=None, out_root=None):
         out = pickle.load(f)
     traj_fn = out['trajectory_feature_names'][subset]
     # Baseline features were ablated out (worse TEST_NASA on both subsets), so
-    # the v2/v5 pipelines emit an empty list here. An older pickle would still
+    # the final pipeline emits an empty list here. An older pickle would still
     # carry 14 baseline columns, which would silently change the feature count
     # a checkpoint was trained against -- so say what was found rather than
     # concatenating whatever turns up.
     base_fn = out['baseline_feature_names'][subset]
     if base_fn:
         print(f"  WARNING: {os.path.basename(pkl)} carries {len(base_fn)} baseline "
-              f"features; the v2/v5 pipelines emit none. They are being INCLUDED -- "
+              f"features; the final pipeline emits none. They are being INCLUDED -- "
               f"regenerate the pickle to drop them.")
     tr_raw = out['feature_data'][subset]['train']
     te_raw = out['feature_data'][subset]['test']

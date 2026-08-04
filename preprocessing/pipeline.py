@@ -2,8 +2,8 @@
 C-MAPSS preprocessing -- causal and leak-free, one implementation for FD001
 and FD003.
 
-    python -m preprocessing FD001        -> output_FD001_v2.pkl
-    python -m preprocessing FD003        -> output_FD003_v5.pkl
+    python -m preprocessing FD001        -> output_FD001_final.pkl
+    python -m preprocessing FD003        -> output_FD003_final.pkl
 
 Both subsets have a SINGLE operating condition, so neither needs the regime
 clustering FD002/FD004 require, and both use the same 14 literature-confirmed
@@ -15,8 +15,8 @@ same weighting, same emitted schema.
 Feature set: 14 raw sensors. The 4 geometry features are attached downstream
 by model.geometry.build_geometry, giving 18 in total.
 
-BASELINE FEATURES REMOVED (FD001 v2 / FD003 v5)
------------------------------------------------
+BASELINE FEATURES REMOVED
+-------------------------
 The 14 causal expanding-baseline columns were ablated directly against a
 no-baseline control on both subsets and made TEST_NASA worse on both --
 roughly doubling individual-seed NASA on FD001, same direction on FD003. The
@@ -64,7 +64,11 @@ SELECTED = ['s2', 's3', 's4', 's7', 's8', 's9', 's11', 's12',
 
 RUL_CAP = 125.0
 
-VERSION = {'FD001': 'v2', 'FD003': 'v5'}
+# One label for both subsets: they are now processed identically, so a
+# per-subset version number said nothing except which historical revision each
+# had reached. 'final' is the settled state -- no baseline features, no
+# weighting, nothing left that an ablation still has an opinion about.
+VERSION = {'FD001': 'final', 'FD003': 'final'}
 
 
 def read_raw(data_dir, name):
