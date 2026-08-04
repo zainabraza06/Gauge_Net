@@ -33,10 +33,23 @@ def raw_path(subset, data_root=None):
     return os.path.join(data_root or DATA_ROOT, f'RUL_{subset}.txt')
 
 
-def load_subset(subset, cache_dir=None, data_root=None, out_root=None):
-    """Returns (fn, tr_c, te_c, rul_true, fml).
+def features_for(cfg, traj_fn, geom_cols):
+    """The ordered feature list one config trains on.
 
-    fn        ordered feature columns: trajectory + baseline + geometry
+    Geometry is a rung of the ladder, not a fixed part of the input, so the
+    columns are attached to the frames once and selected per config here --
+    the alternative, loading the subset twice, would recompute the geometry
+    cache for no reason.
+    """
+    return list(traj_fn) + (list(geom_cols) if cfg['use_geometry'] else [])
+
+
+def load_subset(subset, cache_dir=None, data_root=None, out_root=None):
+    """Returns (traj_fn, geom_cols, tr_c, te_c, rul_true, fml).
+
+    traj_fn   the trajectory sensor columns, in order
+    geom_cols the geometry columns, attached to the frames but NOT prepended
+              to a feature list here: pass both through features_for(cfg, ...)
     tr_c/te_c train and test frames with the geometry columns attached
     rul_true  ground-truth test RUL, capped to match the training target
     fml       median fleet life, the scale that normalises cycle -> life
@@ -77,11 +90,11 @@ def load_subset(subset, cache_dir=None, data_root=None, out_root=None):
     te_raw = out['feature_data'][subset]['test']
 
     geom_cols, tr_c, te_c = build_geometry(traj_fn, tr_raw, te_raw, cache_dir)
-    fn = traj_fn + base_fn + geom_cols
-    print(f"  features: {len(traj_fn)} sensors + {len(base_fn)} baseline "
-          f"+ {len(geom_cols)} geometry = {len(fn)}")
+    traj_fn = traj_fn + base_fn
+    print(f"  features: {len(traj_fn)} sensors + {len(geom_cols)} geometry available "
+          f"= {len(traj_fn) + len(geom_cols)} (a config selects geometry or not)")
 
     rul_true = np.minimum(
         pd.read_csv(rul_file, header=None, names=['rul']).values.ravel(), RUL_CAP)
     fml = float(np.median(tr_c.groupby('unit')['cycle'].max().values))
-    return fn, tr_c, te_c, rul_true, fml
+    return traj_fn, geom_cols, tr_c, te_c, rul_true, fml

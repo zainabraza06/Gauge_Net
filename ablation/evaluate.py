@@ -21,7 +21,7 @@ import os
 import numpy as np
 
 from model.config import DEVICE, DATA_ROOT, OUT_ROOT, DATASETS
-from model.data import load_subset
+from model.data import load_subset, features_for
 from model.inference import discover_seeds, evaluate_checkpoint
 from model.metrics import ACC_THRESHOLDS
 
@@ -50,16 +50,17 @@ def run_dataset(subset, configs, data_root=None, out_root=None):
               f"(run 'python -m ablation.train' first)")
         return None
 
-    fn, tr_c, te_c, rul_true, fml = load_subset(subset, cache_dir=out_dir,
-                                                data_root=data_root, out_root=out_root)
-    print(f"  feature count: {len(fn)}")
+    traj_fn, geom_cols, tr_c, te_c, rul_true, fml = load_subset(
+        subset, cache_dir=out_dir, data_root=data_root, out_root=out_root)
 
     all_ensembles = {}
     csv_rows = []
     for cfg in configs:
         name = cfg['name']
+        fn = features_for(cfg, traj_fn, geom_cols)
         seeds_found = discover_seeds(out_dir, name)
-        print(f"\n{'=' * 70}\nCONFIG = {name}  (found seeds: {seeds_found})\n{'=' * 70}")
+        print(f"\n{'=' * 70}\nCONFIG = {name}  ({len(fn)} features, "
+              f"found seeds: {seeds_found})\n{'=' * 70}")
         if not seeds_found:
             print(f"  no checkpoints found for {name} -- skipping this config")
             continue

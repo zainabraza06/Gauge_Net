@@ -29,7 +29,7 @@ from torch.utils.data import DataLoader
 
 from model.config import (DEVICE, DATA_ROOT, OUT_ROOT, SCALE, LR, LR_MIN, WD, GRAD_CLIP,
                           EPOCHS, WARMUP_EP, BATCH, PATIENCE, MC_PASSES_VAL, DATASETS)
-from model.data import load_subset
+from model.data import load_subset, features_for
 from model.igrfnet import build_model
 from model.inference import mc_predict, predict_test_set
 from model.losses import asym_huber
@@ -127,15 +127,17 @@ def run_dataset(subset, configs, seeds, overwrite=False, data_root=None, out_roo
     out_dir = os.path.join(out_root or OUT_ROOT, subset)
     os.makedirs(out_dir, exist_ok=True)
 
-    fn, tr_c, te_c, rul_true, fml = load_subset(subset, cache_dir=out_dir,
-                                                data_root=data_root, out_root=out_root)
+    traj_fn, geom_cols, tr_c, te_c, rul_true, fml = load_subset(
+        subset, cache_dir=out_dir, data_root=data_root, out_root=out_root)
     print(f"  train engines: {tr_c['unit'].nunique()}  "
           f"|  test engines: {te_c['unit'].nunique()}")
 
     all_results = {}
     for cfg in configs:
         name = cfg['name']
-        print(f"\n{'=' * 70}\nCONFIG = {name}\n{'=' * 70}")
+        fn = features_for(cfg, traj_fn, geom_cols)
+        print(f"\n{'=' * 70}\nCONFIG = {name}  ({len(fn)} features, "
+              f"geometry={cfg['use_geometry']})\n{'=' * 70}")
         all_results[name] = []
         for seed in seeds:
             ckpt = os.path.join(out_dir, f'{name}_seed{seed}.pt')

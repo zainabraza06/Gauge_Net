@@ -24,15 +24,15 @@ The rung name is also the checkpoint filename prefix
 
 CONFIGS = [
     dict(name='1_backbone_only', use_sensor_branch=False, backbone='far_only',
-         use_reverse=False, use_healthy=False),
+         use_geometry=True, use_reverse=False, use_healthy=False),
     dict(name='2_plus_sensor_branch', use_sensor_branch=True, backbone='far_only',
-         use_reverse=False, use_healthy=False),
+         use_geometry=True, use_reverse=False, use_healthy=False),
     dict(name='3c_near_far_both', use_sensor_branch=True, backbone='both',
-         use_reverse=False, use_healthy=False),
+         use_geometry=True, use_reverse=False, use_healthy=False),
     dict(name='4_plus_reverse', use_sensor_branch=True, backbone='both',
-         use_reverse=True, use_healthy=False),
+         use_geometry=True, use_reverse=True, use_healthy=False),
     dict(name='6_plus_healthy_FINAL', use_sensor_branch=True, backbone='both',
-         use_reverse=True, use_healthy=True),
+         use_geometry=True, use_reverse=True, use_healthy=True),
 ]
 
 SEEDS = [42, 43, 53, 51, 3]
