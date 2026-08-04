@@ -69,7 +69,9 @@ USE_MULTIWINDOW = False
 LAST_K = 9
 
 # ── architecture ──
-SENSOR_GATE_DIM = 8; SENSOR_GATE_HEADS = 2
+# Sensor gate: 16-dim embedding over 4 heads, matching the settled final
+# configuration. It costs ~1k parameters against the 8/2 setting it replaces.
+SENSOR_GATE_DIM = 16; SENSOR_GATE_HEADS = 4
 ATTN_HEADS = 2
 NEAR_WINDOW = 8       # local attention span of the near path
 

@@ -104,11 +104,11 @@ differ by that component alone.
 | Rung | Adds | Params (18 features) |
 |---|---|---|
 | `1_backbone_only` | single full-causal transformer path | 309,218 |
-| `2_plus_sensor_gate` | cross-sensor input gating | 309,691 |
-| `3c_near_far_both` | dual near/far paths + content-conditioned mixing gate | 571,513 |
-| `4_plus_reverse` | time-reversed encoding, learned blend | 721,082 |
-| `5_plus_spectral` | frequency-content gating | 732,410 |
-| `6_plus_healthy_FINAL` | healthy-window contrast | 779,066 |
+| `2_plus_sensor_gate` | cross-sensor input gating | 310,675 |
+| `3c_near_far_both` | dual near/far paths + content-conditioned mixing gate | 572,497 |
+| `4_plus_reverse` | time-reversed encoding, learned blend | 722,066 |
+| `5_plus_spectral` | frequency-content gating | 733,394 |
+| `6_plus_healthy_FINAL` | healthy-window contrast | 780,050 |
 
 A rung's name is its checkpoint filename prefix (`<name>_seed<seed>.pt`), so
 renaming one orphans its checkpoints.
