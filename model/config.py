@@ -48,7 +48,11 @@ DROPOUT = 0.15
 # ── optimisation ──
 LR = 3e-4; LR_MIN = 1e-6; WD = 1e-3; GRAD_CLIP = 0.5
 EPOCHS = 150; WARMUP_EP = 20; BATCH = 128
-PATIENCE = 25
+# Early stopping on validation NASA. 15 rather than 25: with six rungs x five
+# seeds x two datasets the extra 10 epochs of waiting cost more than the runs
+# they rescue, and selection is on the best epoch anyway, so a later recovery
+# would have had to beat a checkpoint already saved.
+PATIENCE = 15
 VAL_FRAC = 0.20       # fraction of TRAIN engines held out per seed
 END_TRIM_MAX = 5      # random end-of-life trim, augments run-to-failure data
 
