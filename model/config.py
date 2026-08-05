@@ -79,12 +79,17 @@ SENSOR_BRANCH_DIM = 32; SENSOR_BRANCH_HEADS = 4; SENSOR_BRANCH_LAYERS = 2
 ATTN_HEADS = 2
 NEAR_WINDOW = 8       # local attention span of the near path
 
+# The subsets the ablation runs on by default. FD002 and FD004 preprocess
+# (regime-normalised) but are not in the default study: every result reported
+# so far is on the single-condition pair, and mixing in the multi-regime
+# subsets would change what the ladder's numbers mean. Pass --datasets FD002
+# to run them.
 DATASETS = ['FD001', 'FD003']
 
 # Preprocessed input produced by the preprocessing package, per subset.
 # 'final' = no baseline features, no weighting: trajectory + capped RUL only.
 # Must match preprocessing.pipeline.VERSION, which names the file written.
-PIPELINE_VERSION = {'FD001': 'final', 'FD003': 'final'}
+PIPELINE_VERSION = {s: 'final' for s in ('FD001', 'FD002', 'FD003', 'FD004')}
 
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
