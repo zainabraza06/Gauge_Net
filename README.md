@@ -111,6 +111,7 @@ differ by that component alone.
 | `geometry` | Riemannian / Wasserstein drift features | 18 | 571,040 |
 | `sensor_branch` | iTransformer cross-sensor branch + cross-attention fusion | 18 | 745,984 |
 | `full_model` | reverse-time encoding + healthy-window contrast | 18 | 942,209 |
+| `full_model_regime` | learned per-timestep operating-regime embedding — **FD002/FD004 only** | 19 | 942,785 |
 
 A rung's name is its checkpoint filename prefix (`<name>_seed<seed>.pt`), so
 renaming one orphans its checkpoints.
@@ -135,6 +136,15 @@ not carry; this clusters rows by three measured columns with six known
 settings. No fault-mode label is emitted or used anywhere — FD003 and FD004
 have two modes each, and the model is expected to infer the mode from the
 trajectory.
+
+`full_model_regime` is the one rung that is not universal. Per-regime
+z-scoring removes each regime's mean, and with it *which* condition a row was
+recorded in, so that rung embeds the regime id per timestep and adds it back
+to the projected features. The id rides as the **last** column of the feature
+tensor and the model splits it off by position, so it must stay last. On
+FD001/FD003 the rung is skipped — one constant id would make it `full_model`
+with dead parameters under a name implying a comparison nobody ran — and the
+skip keys off the column being present, not off a subset name.
 
 The pipeline declares which scheme a subset gets and then **cross-checks it
 against the measured op-condition variance**, failing in either direction, so
