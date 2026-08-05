@@ -17,6 +17,13 @@ a leave-one-out study.
   sensor_branch  + the iTransformer-style cross-sensor branch and its
                  cross-attention fusion.
   full_model     + the reverse-time encoding and the healthy-window contrast.
+  full_model_regime
+                 + a learned embedding of the operating regime, added per
+                 timestep. MULTI-REGIME SUBSETS ONLY (FD002, FD004): the
+                 per-regime z-score removes each regime's mean, and with it
+                 which flight condition a row was recorded in, so this hands
+                 that back. On FD001/FD003 every row is one regime, so the
+                 rung is skipped rather than trained on a constant.
 
 Neither the TCN baseline nor the spectral gate is a rung. The convolutional
 baseline was dropped: the study is about what the attention architecture's
@@ -47,11 +54,16 @@ CONFIGS = [
          use_sensor_branch=True, use_reverse=False, use_healthy=False),
     dict(name='full_model', backbone='both', use_geometry=True,
          use_sensor_branch=True, use_reverse=True, use_healthy=True),
+    dict(name='full_model_regime', backbone='both', use_geometry=True,
+         use_sensor_branch=True, use_reverse=True, use_healthy=True,
+         use_regime=True),
 ]
 
-# Training order only. Analysis always walks CONFIGS.
+# Training order only. Analysis always walks CONFIGS. full_model_regime is
+# last in both: it is the top of the staircase, so running it early would put
+# a rung before the one it is measured against.
 RUN_ORDER = ['full_model', 'transformer', 'near_far', 'geometry',
-             'sensor_branch']
+             'sensor_branch', 'full_model_regime']
 
 SEEDS = [53, 51, 43, 42, 3]
 
@@ -61,6 +73,21 @@ def config_by_name(name):
         if cfg['name'] == name:
             return cfg
     raise KeyError(f"unknown config {name!r}; known: {[c['name'] for c in CONFIGS]}")
+
+
+def applicable_configs(configs, subset_has_regimes):
+    """Drops the rungs a subset cannot support.
+
+    Only full_model_regime is conditional: on a single-condition subset its
+    embedding would index one constant id, so it would be full_model with a
+    few dead parameters and a rung name implying a comparison that was never
+    made. Skipping is reported by the caller rather than done silently.
+    """
+    if subset_has_regimes:
+        return list(configs), []
+    keep = [c for c in configs if not c.get('use_regime')]
+    dropped = [c['name'] for c in configs if c.get('use_regime')]
+    return keep, dropped
 
 
 def configs_in_run_order(configs=None):

@@ -33,6 +33,9 @@ def raw_path(subset, data_root=None):
     return os.path.join(data_root or DATA_ROOT, f'RUL_{subset}.txt')
 
 
+REGIME_COL = 'regime_id'
+
+
 def features_for(cfg, traj_fn, geom_cols):
     """The ordered feature list one config trains on.
 
@@ -40,8 +43,16 @@ def features_for(cfg, traj_fn, geom_cols):
     columns are attached to the frames once and selected per config here --
     the alternative, loading the subset twice, would recompute the geometry
     cache for no reason.
+
+    regime_id, when the config asks for it, goes LAST and stays last: the
+    model splits it off the feature tensor by position, so putting it anywhere
+    else would feed a sensor into the embedding and the regime id into the
+    projection, with no error to say so.
     """
-    return list(traj_fn) + (list(geom_cols) if cfg['use_geometry'] else [])
+    fn = list(traj_fn) + (list(geom_cols) if cfg['use_geometry'] else [])
+    if cfg.get('use_regime'):
+        fn.append(REGIME_COL)
+    return fn
 
 
 def load_subset(subset, cache_dir=None, data_root=None, out_root=None):
@@ -89,12 +100,23 @@ def load_subset(subset, cache_dir=None, data_root=None, out_root=None):
     tr_raw = out['feature_data'][subset]['train']
     te_raw = out['feature_data'][subset]['test']
 
+    has_regime = REGIME_COL in tr_raw.columns and REGIME_COL in te_raw.columns
     geom_cols, tr_c, te_c = build_geometry(traj_fn, tr_raw, te_raw, cache_dir)
     traj_fn = traj_fn + base_fn
     print(f"  features: {len(traj_fn)} sensors + {len(geom_cols)} geometry available "
-          f"= {len(traj_fn) + len(geom_cols)} (a config selects geometry or not)")
+          f"= {len(traj_fn) + len(geom_cols)} (a config selects geometry or not)"
+          f"{'  + regime_id (multi-regime subset)' if has_regime else ''}")
 
     rul_true = np.minimum(
         pd.read_csv(rul_file, header=None, names=['rul']).values.ravel(), RUL_CAP)
     fml = float(np.median(tr_c.groupby('unit')['cycle'].max().values))
     return traj_fn, geom_cols, tr_c, te_c, rul_true, fml
+
+
+def has_regimes(tr_c):
+    """Whether this subset carries a regime id, i.e. was regime-normalised.
+
+    Read off the frame rather than a subset name, so a rung that conditions on
+    the regime is skipped wherever the column genuinely is not there.
+    """
+    return REGIME_COL in tr_c.columns

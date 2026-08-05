@@ -78,6 +78,10 @@ LAST_K = 9
 SENSOR_BRANCH_DIM = 32; SENSOR_BRANCH_HEADS = 4; SENSOR_BRANCH_LAYERS = 2
 ATTN_HEADS = 2
 NEAR_WINDOW = 8       # local attention span of the near path
+# Operating regimes on the multi-regime subsets. Must match
+# preprocessing.pipeline.N_REGIMES, which assigns the ids the embedding
+# indexes -- an id past the end would index out of bounds.
+N_REGIMES = 6
 
 # The subsets the ablation runs on by default. FD002 and FD004 preprocess
 # (regime-normalised) but are not in the default study: every result reported

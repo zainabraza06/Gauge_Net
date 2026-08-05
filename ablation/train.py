@@ -2,7 +2,7 @@
 Trains every rung of the ablation ladder, for every seed, on every dataset.
 
     python -m ablation.train
-    python -m ablation.train --datasets FD001 --configs 6_plus_healthy_FINAL
+    python -m ablation.train --datasets FD002 --configs full_model_regime
 
 Checkpoints go to OUT_ROOT/<dataset>/<config>_seed<seed>.pt, which is the
 layout ablation.evaluate discovers. A rung that already has a checkpoint for a
@@ -29,14 +29,15 @@ from torch.utils.data import DataLoader
 
 from model.config import (DEVICE, DATA_ROOT, OUT_ROOT, SCALE, LR, LR_MIN, WD, GRAD_CLIP,
                           EPOCHS, WARMUP_EP, BATCH, PATIENCE, MC_PASSES_VAL, DATASETS)
-from model.data import load_subset, features_for
+from model.data import load_subset, features_for, has_regimes
 from model.igrfnet import build_model
 from model.inference import mc_predict, predict_test_set
 from model.losses import asym_huber
 from model.metrics import nasa_score, all_metrics, ACC_THRESHOLDS
 from model.windows import RULDataset, collate, build_val_snapshots, val_engines_for_seed
 
-from .configs import CONFIGS, SEEDS, config_by_name, configs_in_run_order
+from .configs import (CONFIGS, SEEDS, applicable_configs, config_by_name,
+                      configs_in_run_order)
 
 
 def train_one_seed(seed, fn, tr_c, te_c, rul_true, fml, ckpt, cfg, tag=''):
@@ -138,6 +139,11 @@ def run_dataset(subset, configs, seeds, overwrite=False, data_root=None, out_roo
         subset, cache_dir=out_dir, data_root=data_root, out_root=out_root)
     print(f"  train engines: {tr_c['unit'].nunique()}  "
           f"|  test engines: {te_c['unit'].nunique()}")
+
+    configs, dropped = applicable_configs(configs, has_regimes(tr_c))
+    if dropped:
+        print(f"  {subset} has one operating condition -- skipping regime-conditioned "
+              f"rung(s): {dropped}")
 
     all_results = {}
     # Trained full-model-first; the analysis stages always walk CONFIGS order.
