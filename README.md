@@ -1,7 +1,9 @@
 # IGRFNet — geometry-informed RUL prediction on C-MAPSS
 
 Component-by-component ablation of a transformer-based Remaining Useful Life
-(RUL) estimator on the NASA C-MAPSS turbofan datasets **FD001** and **FD003**.
+(RUL) estimator on the NASA C-MAPSS turbofan datasets. The ladder is reported
+on **FD001** and **FD003**; **FD002** and **FD004** preprocess as well, with
+regime normalisation.
 
 Every stage is causal: a prediction at cycle *t* is computed from cycles
 ≤ *t* of that engine alone, and every normalisation statistic is fitted on
@@ -13,7 +15,7 @@ the training split only.
 
 ```
 preprocessing/     raw C-MAPSS text  ->  leak-free feature pickle
-  pipeline.py        z-score, RUL cap, trajectory + label only
+  pipeline.py        z-score (global or per-regime), RUL cap, label
   __main__.py        python -m preprocessing FD001
 
 model/             everything shared by training and evaluation
@@ -48,7 +50,7 @@ pip install -r requirements.txt
 
 Download **CMAPSSData** from the
 [NASA Prognostics Data Repository](https://www.nasa.gov/intelligent-systems-division/discovery-and-systems-health/pcoe/pcoe-data-set-repository/)
-and put six files in `data/`:
+and put the three files per subset you want in `data/`:
 
 ```
 data/
@@ -112,6 +114,37 @@ differ by that component alone.
 
 A rung's name is its checkpoint filename prefix (`<name>_seed<seed>.pt`), so
 renaming one orphans its checkpoints.
+
+## Operating conditions
+
+| Subset | Conditions | Normalisation |
+|---|---|---|
+| FD001, FD003 | one | a single z-score, fitted on train |
+| FD002, FD004 | six | per-regime z-score: `KMeans(k=6)` over `op1/op2/op3`, fitted on train |
+
+On FD002 and FD004 a change of flight condition moves a sensor far more than
+degradation does, so one global z-score would leave regime changes looking
+like wear. Each row is normalised against its own regime's train statistics
+instead. Test rows are assigned to the nearest **train-fit** centre and
+normalised with that regime's **train** statistics, so no test row reaches a
+statistic.
+
+This clustering is not the fault-mode discovery that was tried and dropped.
+That clustered engines by degradation pattern, inferring a label the data does
+not carry; this clusters rows by three measured columns with six known
+settings. No fault-mode label is emitted or used anywhere — FD003 and FD004
+have two modes each, and the model is expected to infer the mode from the
+trajectory.
+
+The pipeline declares which scheme a subset gets and then **cross-checks it
+against the measured op-condition variance**, failing in either direction, so
+a subset cannot quietly be normalised the wrong way. It also fails if any
+regime has no train rows, or if test rows land in one — those rows would
+otherwise be left at zero, reading as a perfectly average sensor.
+
+`python -m ablation.train` still defaults to FD001 and FD003: every number
+reported so far is on the single-condition pair. Pass `--datasets FD002` to
+run the others.
 
 ## Features and objective
 
