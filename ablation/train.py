@@ -151,7 +151,8 @@ def run_dataset(subset, configs, seeds, overwrite=False, data_root=None, out_roo
         name = cfg['name']
         fn = features_for(cfg, traj_fn, geom_cols)
         print(f"\n{'=' * 70}\nCONFIG = {name}  ({len(fn)} features, "
-              f"geometry={cfg['use_geometry']})\n{'=' * 70}")
+              f"geometry={cfg['use_geometry']}, regime={cfg.get('use_regime', False)})"
+              f"\n{'=' * 70}")
         all_results[name] = []
         for seed in seeds:
             ckpt = os.path.join(out_dir, f'{name}_seed{seed}.pt')
