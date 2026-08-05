@@ -36,28 +36,42 @@ SENSORS = ['s2', 's3', 's4', 's7', 's8', 's9', 's11', 's12',
 rng = np.random.default_rng(0)
 
 
-def make_engine(uid, life):
-    """A degrading trajectory: sensors drift on a quadratic ramp toward failure."""
+# Six discrete flight conditions, the shape FD002/FD004 actually have.
+REGIMES = [(0.0, 0.0, 100.0), (10.0, 0.25, 100.0), (20.0, 0.70, 100.0),
+           (25.0, 0.62, 60.0), (35.0, 0.84, 100.0), (42.0, 0.84, 100.0)]
+REGIME_OFFSET = 40.0     # how far a regime shifts every sensor
+
+
+def make_engine(uid, life, multi_regime=False):
+    """A degrading trajectory: sensors drift on a quadratic ramp toward failure.
+
+    With multi_regime, each cycle is flown in one of six conditions and every
+    sensor is offset by a per-regime constant far larger than the degradation
+    signal -- which is exactly why those subsets cannot use a single z-score.
+    """
     rows = []
     for cycle in range(1, life + 1):
         drift = (cycle / life) ** 2
-        sensors = [500.0 + s * 13.0 + (30.0 if s % 3 == 0 else -20.0) * drift
+        r = int(rng.integers(0, len(REGIMES))) if multi_regime else None
+        op = REGIMES[r] if multi_regime else (0.0, 0.0, 100.0)
+        offset = REGIME_OFFSET * r if multi_regime else 0.0
+        sensors = [500.0 + s * 13.0 + offset + (30.0 if s % 3 == 0 else -20.0) * drift
                    + rng.normal(0, 0.6) for s in range(21)]
-        rows.append([uid, cycle, 0.0, 0.0, 100.0] + sensors)
+        rows.append([uid, cycle] + list(op) + sensors)
     return rows
 
 
-def write_subset(subset, n_train=14, n_test=9):
+def write_subset(subset, n_train=14, n_test=9, multi_regime=False):
     """Writes train/test/RUL files in the exact whitespace format of C-MAPSS."""
     train = []
     for u in range(1, n_train + 1):
-        train += make_engine(u, int(rng.integers(150, 260)))
+        train += make_engine(u, int(rng.integers(150, 260)), multi_regime)
 
     test, ruls = [], []
     for u in range(1, n_test + 1):
         life = int(rng.integers(150, 260))
         cut = int(rng.integers(90, life - 20))     # test engines stop mid-life
-        test += make_engine(u, cut)
+        test += make_engine(u, cut, multi_regime)
         ruls.append(min(life - cut, 125))
 
     def fmt(rows):
@@ -120,6 +134,25 @@ def main():
         cols = set(pickle.load(f)['feature_data']['FD001']['train'].columns)
     assert not cols - ({'unit', 'cycle', 'rul_true', 'rul'} | set(SENSORS)), sorted(cols)
     print("  [2] preprocessing -> output_FD001_final.pkl, closed schema, checks passed  OK")
+
+    # FD002 is preprocessed but not trained here: the regime normalisation is
+    # the only thing that differs, and it is entirely a preprocessing concern.
+    if not os.path.exists(os.path.join(DATA, 'train_FD002.txt')):
+        write_subset('FD002', multi_regime=True)
+    out = run(['-m', 'preprocessing', 'FD002', '--data-root', DATA])
+    assert 'ALL CHECKS PASSED' in out, out[-2500:]
+    assert 'per-regime, KMeans(k=6)' in out
+    assert 'every regime populated in train: True' in out
+    assert 'no test rows stranded in an unfitted regime: True' in out
+    with open(os.path.join(DATA, 'pipeline_output', 'output_FD002_final.pkl'), 'rb') as f:
+        fd002 = pickle.load(f)
+    # Per-regime z-scoring must remove the regime offsets: a single global
+    # z-score would leave a spread far wider than 1 because the offsets
+    # dominate the degradation signal.
+    vals = fd002['feature_data']['FD002']['train'][SENSORS].values
+    assert abs(vals.mean()) < 0.05 and abs(vals.std() - 1.0) < 0.05, (vals.mean(), vals.std())
+    assert fd002['normalization_stats']['FD002']['scheme'] == 'per-regime'
+    print("  [2b] FD002 -> 6 regimes fitted on train, offsets normalised away  OK")
 
     if not os.path.isdir(os.path.join(OUT, 'FD001')):
         out = run(['-m', 'ablation.evaluate', '--datasets', 'FD001',
