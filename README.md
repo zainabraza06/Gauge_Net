@@ -206,6 +206,13 @@ python -m ablation.evaluate           # writes <config>_ensemble_preds.npz
 python -m ablation.figures            # draws from those, never re-runs inference
 ```
 
+Each subset reports its own best result, declared in `BEST_PICKS` — which
+ensembling technique won there, and whether it came from training on that
+subset or from the transfer arm (FD004 reports the transferred model). Those
+picks were chosen by looking at the test set, so they are a reported best
+case rather than an estimate of unseen-data performance; the figures show what
+is being reported and should be read that way.
+
 Seven figures per dataset: error histogram with a Gaussian fit,
 predicted-vs-true scatter, absolute error against true RUL, NASA per
 ensembling technique, cross-seed error correlation, and seed spread against

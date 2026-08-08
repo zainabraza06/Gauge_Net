@@ -49,6 +49,20 @@ from model.metrics import all_metrics
 from . import figures_seeds as FS
 
 SETTLED_CONFIG = 'sensor_branch_linear_far'
+
+# The result each subset reports: which ensembling technique won there, and
+# whether it came from training on that subset or from the transfer arm.
+# Written down rather than recomputed, because "best" was chosen by looking at
+# the test set -- so these numbers are a reported best case, not an estimate
+# of what the method would score on unseen data, and a figure drawn from them
+# should not be read as one.
+BEST_PICKS = {
+    'FD001': dict(source='direct', ensemble='mean'),
+    'FD002': dict(source='direct', ensemble='softmax_sharp'),
+    'FD003': dict(source='direct', ensemble='softmax_soft'),
+    'FD004': dict(source='transfer', ensemble='softmax_sharp'),
+}
+TRANSFER_ARM = 'FD002_to_FD004_frozen'
 DPI = 160
 BLUE, ORANGE, GREEN, RED = '#4C72B0', '#DD8452', '#55A868', '#C44E52'
 
@@ -59,17 +73,47 @@ def figure_dir(out_root, subset=None):
     return d
 
 
-def load_members(subset, config, out_root):
-    """Per-seed results, for the figures that need individual members."""
-    path = os.path.join(out_root, subset, f'{config}_results.pkl')
+def load_members_at(path):
     if not os.path.exists(path):
         return None
     with open(path, 'rb') as f:
         return pickle.load(f)
 
 
+def load_members(subset, config, out_root):
+    """Per-seed results, from whichever run this subset reports."""
+    if BEST_PICKS.get(subset, {}).get('source') == 'transfer':
+        return load_members_at(os.path.join(out_root, 'transfer', TRANSFER_ARM,
+                                            'results.pkl'))
+    return load_members_at(os.path.join(out_root, subset, f'{config}_results.pkl'))
+
+
+def _rul(subset, data_root):
+    rul_file = raw_path(subset, data_root)
+    if not os.path.exists(rul_file):
+        return None
+    return np.minimum(
+        pd.read_csv(rul_file, header=None, names=['rul']).values.ravel(), RUL_CAP)
+
+
 def load_predictions(subset, config, out_root, data_root):
-    """(ensemble predictions by technique, ground-truth RUL) for one subset."""
+    """(ensemble predictions by technique, ground-truth RUL) for one subset.
+
+    A subset whose best result came from the transfer arm reads that arm's
+    members instead: the figures should show the result being reported, and
+    on FD004 that is the transferred model rather than the directly trained
+    one.
+    """
+    if BEST_PICKS.get(subset, {}).get('source') == 'transfer':
+        members = load_members_at(os.path.join(out_root, 'transfer', TRANSFER_ARM,
+                                               'results.pkl'))
+        rul_true = _rul(subset, data_root)
+        if members is None or rul_true is None:
+            return None, None
+        from .ensembling import run_ensembling_suite
+        _, _, combined = run_ensembling_suite(members, rul_true)
+        return {k: v for k, v in combined.items() if v is not None}, rul_true
+
     npz = os.path.join(out_root, subset, f'{config}_ensemble_preds.npz')
     if not os.path.exists(npz):
         return None, None
@@ -82,7 +126,7 @@ def load_predictions(subset, config, out_root, data_root):
     return preds, rul_true
 
 
-def plot_error_hist(subset, pred, rul_true, out_root):
+def plot_error_hist(subset, pred, rul_true, out_root, technique='mean'):
     err = np.asarray(pred) - np.asarray(rul_true)
     mu, sigma = float(err.mean()), float(err.std())
     fig, ax = plt.subplots(figsize=(7, 5))
@@ -102,12 +146,12 @@ def plot_error_hist(subset, pred, rul_true, out_root):
             ha='right', va='top', fontsize=8, color=RED)
     ax.set_xlabel('prediction error (predicted - true RUL, cycles)')
     ax.set_ylabel('density')
-    ax.set_title(f'{subset}: error distribution, mean-ensemble')
+    ax.set_title(f'{subset}: error distribution, {technique}')
     ax.legend(fontsize=8, loc='upper left')
     return _save(fig, figure_dir(out_root, subset), f'error_hist_{subset}')
 
 
-def plot_scatter(subset, pred, rul_true, out_root):
+def plot_scatter(subset, pred, rul_true, out_root, technique='mean'):
     fig, ax = plt.subplots(figsize=(6, 6))
     ax.scatter(rul_true, pred, s=28, alpha=0.55, color=BLUE, edgecolor='none')
     hi = max(float(np.max(rul_true)), float(np.max(pred))) + 5
@@ -118,7 +162,7 @@ def plot_scatter(subset, pred, rul_true, out_root):
     ax.set_ylim(0, hi)
     ax.set_xlabel('true RUL (cycles)')
     ax.set_ylabel('predicted RUL (cycles)')
-    ax.set_title(f'{subset}: predicted vs true, mean-ensemble')
+    ax.set_title(f'{subset}: predicted vs true, {technique}')
     ax.legend(fontsize=8, loc='lower right')
     return _save(fig, figure_dir(out_root, subset), f'scatter_{subset}')
 
@@ -153,13 +197,14 @@ def plot_ensembles(subset, preds, rul_true, out_root):
     names = sorted(preds, key=lambda n: all_metrics(preds[n], rul_true)['nasa'])
     scores = [all_metrics(preds[n], rul_true)['nasa'] for n in names]
     fig, ax = plt.subplots(figsize=(8, 5))
-    colours = [ORANGE if n == 'mean' else BLUE for n in names]
+    reported = BEST_PICKS.get(subset, {}).get('ensemble', 'mean')
+    colours = [ORANGE if n == reported else BLUE for n in names]
     bars = ax.bar(names, scores, color=colours, edgecolor='black', lw=0.5)
     for bar, score in zip(bars, scores):
         ax.text(bar.get_x() + bar.get_width() / 2, score, f'{score:.1f}',
                 ha='center', va='bottom', fontsize=8)
     ax.set_ylabel('NASA score (lower is better)')
-    ax.set_title(f'{subset}: ensembling techniques, sorted; mean highlighted')
+    ax.set_title(f'{subset}: ensembling techniques, sorted; reported one highlighted')
     plt.setp(ax.get_xticklabels(), rotation=30, ha='right')
     return _save(fig, figure_dir(out_root, subset), f'ensembles_{subset}')
 
@@ -191,19 +236,22 @@ def run(subsets, config=SETTLED_CONFIG, data_root=None, out_root=None):
             print(f"  {subset}: no ensemble predictions for {config} -- skipping. Run:\n"
                   f"    python -m ablation.evaluate --datasets {subset} --configs {config}")
             continue
-        if 'mean' not in preds:
-            print(f"  {subset}: predictions carry no 'mean' ensemble -- skipping")
+        pick = BEST_PICKS.get(subset, dict(source='direct', ensemble='mean'))
+        technique = pick['ensemble']
+        if technique not in preds:
+            print(f"  {subset}: no '{technique}' among {sorted(preds)} -- skipping")
             continue
 
-        pred = preds['mean']
+        pred = preds[technique]
+        print(f"  {subset}: reporting '{technique}' from the {pick['source']} run")
         members = load_members(subset, config, out_root)
         per_subset[subset] = dict(
             pred=pred, rul_true=rul_true, all_preds=preds,
             metrics=all_metrics(pred, rul_true),
             seed_scores=[{k: m[k] for k in ('nasa', 'rmse')} for m in members or []],
             seed_preds={m['seed']: np.asarray(m['preds']) for m in members or []})
-        written = [plot_error_hist(subset, pred, rul_true, out_root),
-                   plot_scatter(subset, pred, rul_true, out_root),
+        written = [plot_error_hist(subset, pred, rul_true, out_root, technique),
+                   plot_scatter(subset, pred, rul_true, out_root, technique),
                    plot_error_by_true(subset, pred, rul_true, out_root),
                    plot_ensembles(subset, preds, rul_true, out_root)]
         if per_subset[subset]['seed_preds']:
