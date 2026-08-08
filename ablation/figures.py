@@ -22,12 +22,10 @@ Per dataset, into <out-root>/figures/<dataset>/:
                     where it matters, near failure; this is where that shows.
   ensembles         NASA per ensembling technique, best highlighted.
 
-And across datasets, into <out-root>/figures/:
-
-  cross_dataset     NASA and RMSE per dataset. NASA is a SUM, so its bars are
-                    only comparable between datasets with equally many test
-                    engines -- the engine count is printed on each bar.
-  error_spread      absolute error distributions side by side.
+Everything is computed WITHIN one subset. Nothing compares subsets: NASA is a
+sum over a dataset's engines and the subsets differ in size and in operating
+conditions, so a figure placing them on shared axes invites a comparison the
+numbers do not support.
 
 No radar chart. Mixing accuracies, R2 and reciprocal errors on one axis makes
 an area that looks meaningful and is not: the shape changes with the metric
@@ -166,45 +164,6 @@ def plot_ensembles(subset, preds, rul_true, out_root):
     return _save(fig, figure_dir(out_root, subset), f'ensembles_{subset}')
 
 
-def plot_cross_dataset(per_subset, out_root):
-    subsets = list(per_subset)
-    nasa = [per_subset[s]['metrics']['nasa'] for s in subsets]
-    rmse = [per_subset[s]['metrics']['rmse'] for s in subsets]
-    n_eng = [len(per_subset[s]['rul_true']) for s in subsets]
-
-    x = np.arange(len(subsets))
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.5))
-    b = ax1.bar(x, nasa, color=BLUE, edgecolor='black', lw=0.5)
-    for bar, n in zip(b, n_eng):
-        ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height(), f'n={n}',
-                 ha='center', va='bottom', fontsize=8)
-    ax1.set_xticks(x, subsets)
-    ax1.set_ylabel('NASA score')
-    # Saying this on the figure rather than in a caption: the bars invite a
-    # comparison the metric does not support.
-    ax1.set_title('NASA score -- a SUM, so compare only\nbetween equal engine counts', fontsize=10)
-
-    ax2.bar(x, rmse, color=ORANGE, edgecolor='black', lw=0.5)
-    ax2.set_xticks(x, subsets)
-    ax2.set_ylabel('RMSE (cycles)')
-    ax2.set_title('RMSE -- a mean, comparable across datasets', fontsize=10)
-    fig.suptitle(f'{SETTLED_CONFIG}, mean ensemble')
-    return _save(fig, figure_dir(out_root), 'cross_dataset')
-
-
-def plot_error_spread(per_subset, out_root):
-    subsets = list(per_subset)
-    data = [np.abs(per_subset[s]['pred'] - per_subset[s]['rul_true']) for s in subsets]
-    fig, ax = plt.subplots(figsize=(8, 5))
-    bp = ax.boxplot(data, tick_labels=subsets, patch_artist=True)
-    for patch, colour in zip(bp['boxes'], [BLUE, ORANGE, GREEN, RED] * 4):
-        patch.set_facecolor(colour)
-        patch.set_alpha(0.6)
-    ax.set_ylabel('|prediction error| (cycles)')
-    ax.set_title(f'{SETTLED_CONFIG}: absolute error by dataset')
-    return _save(fig, figure_dir(out_root), 'error_spread')
-
-
 def _saver(out_root):
     """A save(fig, name[, subset]) callable for the seed-level figures, so
     they need no knowledge of where output lives."""
@@ -248,23 +207,14 @@ def run(subsets, config=SETTLED_CONFIG, data_root=None, out_root=None):
                    plot_error_by_true(subset, pred, rul_true, out_root),
                    plot_ensembles(subset, preds, rul_true, out_root)]
         if per_subset[subset]['seed_preds']:
+            save = _saver(out_root)
             written.append(FS.plot_seed_diversity(
-                plt, subset, per_subset[subset]['seed_preds'], rul_true,
-                _saver(out_root)))
+                plt, subset, per_subset[subset]['seed_preds'], rul_true, save))
+            for metric in ('nasa', 'rmse'):
+                written.append(FS.plot_seed_variance(
+                    plt, subset, per_subset[subset], save, metric))
         print(f"  {subset}: {len(written)} figures -> {os.path.dirname(written[0])}")
 
-    if len(per_subset) >= 2:
-        save = _saver(out_root)
-        for path in (plot_cross_dataset(per_subset, out_root),
-                     plot_error_spread(per_subset, out_root),
-                     FS.plot_seed_variance(plt, per_subset, save, 'nasa'),
-                     FS.plot_seed_variance(plt, per_subset, save, 'rmse'),
-                     FS.plot_ensembling_forest(plt, per_subset, save),
-                     FS.plot_technique_ranks(plt, per_subset, save)):
-            if path:
-                print(f"  cross-dataset: {path}")
-    elif per_subset:
-        print("  cross-dataset figures need >=2 datasets with predictions -- skipped")
 
     return per_subset
 

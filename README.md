@@ -206,21 +206,22 @@ python -m ablation.evaluate           # writes <config>_ensemble_preds.npz
 python -m ablation.figures            # draws from those, never re-runs inference
 ```
 
-Per dataset: error histogram with a Gaussian fit, predicted-vs-true scatter,
-absolute error against true RUL, and NASA per ensembling technique. Across
-datasets: a NASA/RMSE summary and an error-spread boxplot. Because the figures
-read the same saved predictions the tables do, a figure cannot disagree with
-the CSV beside it.
+Seven figures per dataset: error histogram with a Gaussian fit,
+predicted-vs-true scatter, absolute error against true RUL, NASA per
+ensembling technique, cross-seed error correlation, and seed spread against
+the ensemble for NASA and RMSE. Because the figures read the same saved
+predictions the tables do, a figure cannot disagree with the CSV beside it.
 
-Two deliberate choices. The over-prediction side is shaded on the error plots,
-since NASA charges `e^(e/10)` for predicting too much life against `e^(-e/13)`
-for too little and a symmetric-looking histogram hides that. And the
-cross-dataset NASA panel prints the engine count on each bar, because NASA is
-a **sum** — those bars are not comparable between datasets of different size,
-and the figure says so rather than leaving it to a caption.
+**Everything stays within one subset.** Nothing places two datasets on shared
+axes: NASA is a sum over a dataset's engines, and the subsets differ in size
+and in operating conditions, so such a figure invites a comparison the numbers
+do not support.
 
-There is no radar chart: accuracies, R² and reciprocal errors on shared axes
-produce an area whose size changes with the metric ordering.
+The over-prediction side is shaded on the error plots, since NASA charges
+`e^(e/10)` for predicting too much life against `e^(-e/13)` for too little and
+a symmetric-looking histogram hides that. There is no radar chart: accuracies,
+R² and reciprocal errors on shared axes produce an area whose size changes
+with the metric ordering.
 
 ## Transfer between subsets
 
