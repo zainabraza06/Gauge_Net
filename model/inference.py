@@ -17,11 +17,10 @@ import torch
 from .config import (DEVICE, SCALE, MC_PASSES_TEST, LAST_K, USE_MULTIWINDOW)
 from .igrfnet import build_model
 from .metrics import nasa_score, ACC_THRESHOLDS, all_metrics
-from .windows import (causal_current_window, causal_healthy_window, healthy_gate_value,
-                      build_val_snapshots, val_engines_for_seed)
+from .windows import causal_current_window, build_val_snapshots, val_engines_for_seed
 
 
-def mc_predict(model, x, lf, x_healthy=None, lf_healthy=None, healthy_gate=None, M=10):
+def mc_predict(model, x, lf, M=10):
     """Mean of M stochastic forward passes with dropout LEFT ON.
 
     model.train() is deliberate: it re-enables dropout so each pass samples a
@@ -31,8 +30,7 @@ def mc_predict(model, x, lf, x_healthy=None, lf_healthy=None, healthy_gate=None,
     """
     model.train()
     with torch.no_grad():
-        preds = torch.stack([model(x, lf, x_healthy=x_healthy, lf_healthy=lf_healthy,
-                                   healthy_gate=healthy_gate) for _ in range(M)], dim=0)
+        preds = torch.stack([model(x, lf) for _ in range(M)], dim=0)
     model.eval()
     return preds.mean(0)
 
@@ -50,17 +48,9 @@ def predict_engine(model, feats, cycles, fml, device=DEVICE, M=MC_PASSES_TEST, k
     for end in range(max(1, n - k_eff + 1), n + 1):
         t = end - 1
         win = causal_current_window(feats, t)
-        hw, n_avail = causal_healthy_window(feats, t)
-        hg = healthy_gate_value(n_avail)
-        lf_val = float(cycles[t] / fml)
-        hlf_val = float(cycles[min(n_avail, n) - 1] / fml)
         t_win = torch.from_numpy(win[np.newaxis].astype(np.float32)).to(device)
-        hw_t = torch.from_numpy(hw[np.newaxis]).to(device)
-        lf_t = torch.tensor([lf_val], dtype=torch.float32).to(device)
-        hlf_t = torch.tensor([hlf_val], dtype=torch.float32).to(device)
-        hg_t = torch.tensor([hg], dtype=torch.float32).to(device)
-        p = float(mc_predict(model, t_win, lf_t, x_healthy=hw_t, lf_healthy=hlf_t,
-                             healthy_gate=hg_t, M=M).item()) * SCALE
+        lf_t = torch.tensor([float(cycles[t] / fml)], dtype=torch.float32).to(device)
+        p = float(mc_predict(model, t_win, lf_t, M=M).item()) * SCALE
         preds.append(p)
     preds = np.array(preds)
     ramp = np.linspace(1.0, len(preds), len(preds))
@@ -121,12 +111,10 @@ def evaluate_checkpoint(seed, fn, tr_c, te_c, rul_true, fml, ckpt, cfg, tag='',
     model.eval()
     npar = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-    val_win, val_rul, val_lf, val_hwin, val_hlf, val_hgate = build_val_snapshots(df_va, fn, fml, seed)
+    val_win, val_rul, val_lf = build_val_snapshots(df_va, fn, fml, seed)
     val_win, val_lf = val_win.to(device), val_lf.to(device)
-    val_hwin, val_hlf, val_hgate = val_hwin.to(device), val_hlf.to(device), val_hgate.to(device)
     with torch.no_grad():
-        val_p = mc_predict(model, val_win, val_lf, x_healthy=val_hwin, lf_healthy=val_hlf,
-                           healthy_gate=val_hgate, M=mc_passes).cpu().numpy() * SCALE
+        val_p = mc_predict(model, val_win, val_lf, M=mc_passes).cpu().numpy() * SCALE
     val_true = val_rul.numpy()
     val_nasa = nasa_score(val_p, val_true)
 

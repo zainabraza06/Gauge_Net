@@ -3,10 +3,9 @@ Causal windowing, the training dataset, and validation snapshots.
 
 Everything a sample sees is drawn from cycles <= t of its own engine. The
 padding rules matter as much as the slicing: a window shorter than W is
-left-padded with the engine's FIRST row (so the sequence still ends at the
-current cycle, which is what the last-step pooling reads), while a healthy
-window shorter than W is right-padded with its own last row (so it still
-begins at cycle 1, which is what makes it a healthy reference).
+left-padded with the engine's FIRST row, so the sequence still ENDS at the
+current cycle -- which is what the last-step half of the pooling reads, and
+what would be silently wrong if the padding went on the other end.
 """
 
 import numpy as np
@@ -27,25 +26,6 @@ def causal_current_window(feats, t, w=W):
     return win
 
 
-def causal_healthy_window(feats, t, w=W):
-    """The engine's own earliest cycles, capped at both w and what has been
-    observed by t. Right-padded with its last row, so the window still starts
-    at cycle 1. Returns the padded window and how many real cycles it holds."""
-    n_avail = min(t + 1, w)
-    healthy = feats[:n_avail]
-    pad = w - n_avail
-    if pad > 0:
-        healthy = np.vstack([healthy, np.tile(healthy[-1], (pad, 1))])
-    return healthy.astype(np.float32), n_avail
-
-
-def healthy_gate_value(n_avail, w=W):
-    """How much of the healthy window is real rather than padding. Scales the
-    healthy contrast so an engine seen for a few cycles contributes a damped
-    signal instead of a confident comparison against padding."""
-    return float(np.clip(n_avail / w, 0.0, 1.0))
-
-
 def val_engines_for_seed(tr_c, seed, val_frac=VAL_FRAC):
     """The validation split a given seed trains with. Deterministic in the
     seed alone, so a split can be reconstructed later from a checkpoint's
@@ -57,8 +37,8 @@ def val_engines_for_seed(tr_c, seed, val_frac=VAL_FRAC):
 
 
 class RULDataset(Dataset):
-    """One sample per (engine, cycle): the causal window ending at that cycle,
-    its healthy counterpart, and the capped RUL target.
+    """One sample per (engine, cycle): the causal window ending at that
+    cycle, its life fraction, and the capped RUL target.
 
     During training each engine is randomly trimmed by up to END_TRIM_MAX
     cycles at the end. Train engines run to failure, so without this the model
@@ -98,16 +78,10 @@ class RULDataset(Dataset):
         ei, t = self.index[idx]
         e = self.engines[ei]
         win = causal_current_window(e['feats'], t)
-        hwin, n_avail = causal_healthy_window(e['feats'], t)
-        hgate = healthy_gate_value(n_avail)
         lf = float(e['cycle'][t] / self.fml)
-        hlf = float(e['cycle'][min(n_avail, len(e['cycle'])) - 1] / self.fml)
         return (torch.from_numpy(win),
                 torch.tensor(e['rul'][t] / SCALE, dtype=torch.float32),
-                torch.tensor(lf, dtype=torch.float32),
-                torch.from_numpy(hwin),
-                torch.tensor(hlf, dtype=torch.float32),
-                torch.tensor(hgate, dtype=torch.float32))
+                torch.tensor(lf, dtype=torch.float32))
 
 
 def collate(batch):
@@ -124,7 +98,7 @@ def build_val_snapshots(df_va, fn, fml, rng_seed, n_trunc=N_VAL_TRUNC):
     on can be reproduced later from the seed alone.
     """
     vrng = np.random.default_rng(rng_seed + 777)
-    windows, ruls, lfs, hwins, hlfs, hgates = [], [], [], [], [], []
+    windows, ruls, lfs = [], [], []
     for _, g in df_va.groupby('unit', sort=False):
         g = g.sort_values('cycle').reset_index(drop=True)
         feats = g[fn].values.astype(np.float32)
@@ -134,15 +108,8 @@ def build_val_snapshots(df_va, fn, fml, rng_seed, n_trunc=N_VAL_TRUNC):
             frac = vrng.uniform(0.20, 0.96)
             t_idx = int(np.argmin(np.abs(cyc - frac * cmax)))
             windows.append(causal_current_window(feats, t_idx))
-            hw, n_avail = causal_healthy_window(feats, t_idx)
-            hwins.append(hw)
-            hgates.append(healthy_gate_value(n_avail))
             ruls.append(min(cmax - cyc[t_idx], RUL_CAP))
             lfs.append(cyc[t_idx] / fml)
-            hlfs.append(cyc[min(n_avail, len(cyc)) - 1] / fml)
     return (torch.from_numpy(np.stack(windows).astype(np.float32)),
             torch.tensor(ruls, dtype=torch.float32),
-            torch.tensor(lfs, dtype=torch.float32),
-            torch.from_numpy(np.stack(hwins).astype(np.float32)),
-            torch.tensor(hlfs, dtype=torch.float32),
-            torch.tensor(hgates, dtype=torch.float32))
+            torch.tensor(lfs, dtype=torch.float32))

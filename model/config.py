@@ -48,11 +48,14 @@ DROPOUT = 0.15
 # ── optimisation ──
 LR = 3e-4; LR_MIN = 1e-6; WD = 1e-3; GRAD_CLIP = 0.5
 EPOCHS = 150; WARMUP_EP = 20; BATCH = 128
-# Early stopping on validation NASA. 15 rather than 25: with six rungs x five
-# seeds x two datasets the extra 10 epochs of waiting cost more than the runs
-# they rescue, and selection is on the best epoch anyway, so a later recovery
-# would have had to beat a checkpoint already saved.
+# Early stopping on validation NASA, per subset. Selection keeps the best
+# epoch either way, so patience only decides how long a run waits for a
+# recovery that would still have to beat an already-saved checkpoint.
+# FD002/FD004 stop sooner: they are the large multi-regime subsets, so an
+# epoch costs several times what it does on FD001/FD003, and their validation
+# curve is noisier -- waiting 15 epochs there buys mostly compute.
 PATIENCE = 15
+PATIENCE_BY_SUBSET = {'FD002': 8, 'FD004': 8}
 VAL_FRAC = 0.20       # fraction of TRAIN engines held out per seed
 END_TRIM_MAX = 5      # random end-of-life trim, augments run-to-failure data
 
@@ -78,22 +81,21 @@ LAST_K = 9
 SENSOR_BRANCH_DIM = 32; SENSOR_BRANCH_HEADS = 4; SENSOR_BRANCH_LAYERS = 2
 ATTN_HEADS = 2
 NEAR_WINDOW = 8       # local attention span of the near path
-# Operating regimes on the multi-regime subsets. Must match
-# preprocessing.pipeline.N_REGIMES, which assigns the ids the embedding
-# indexes -- an id past the end would index out of bounds.
-N_REGIMES = 6
 
-# The subsets the ablation runs on by default. FD002 and FD004 preprocess
-# (regime-normalised) but are not in the default study: every result reported
-# so far is on the single-condition pair, and mixing in the multi-regime
-# subsets would change what the ladder's numbers mean. Pass --datasets FD002
-# to run them.
-DATASETS = ['FD001', 'FD003']
+# All four C-MAPSS subsets. The ladder is the same on each; what differs is
+# the preprocessing (single vs per-regime z-score) and, on FD002/FD004, that
+# the regime-conditioned config is available.
+DATASETS = ['FD001', 'FD002', 'FD003', 'FD004']
 
 # Preprocessed input produced by the preprocessing package, per subset.
 # 'final' = no baseline features, no weighting: trajectory + capped RUL only.
 # Must match preprocessing.pipeline.VERSION, which names the file written.
 PIPELINE_VERSION = {s: 'final' for s in ('FD001', 'FD002', 'FD003', 'FD004')}
+
+def patience_for(subset):
+    """Early-stopping patience for one subset."""
+    return PATIENCE_BY_SUBSET.get(subset, PATIENCE)
+
 
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
