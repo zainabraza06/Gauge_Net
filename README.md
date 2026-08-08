@@ -199,6 +199,35 @@ Riemannian pair responds to changes in coupling *between* sensors, the
 Wasserstein pair to changes in each sensor's own distribution. They are
 cached in `geom_cache.pkl`, since computing them costs more than training.
 
+## Deployed cost
+
+```bash
+pip install thop                       # exact MACs; without it the column is skipped
+python -m ablation.efficiency --per-subset
+```
+
+Measured once for the settled model, in a single process with one FLOPs
+source, and confirmed equal across all four subsets:
+
+| | |
+|---|---|
+| parameters | 745,984 |
+| MACs / forward pass | 26,744,496 (thop) |
+| latency / forward | 8–11 ms |
+| latency / prediction | 0.8–1.1 s (100 MC-dropout passes) |
+| peak GPU memory | 16–18 MB |
+
+The four subsets run the same architecture on the same 18 features, and the
+FD004 transfer arm shares it, so params and MACs are equal **by construction**
+— a table showing them differing means the rows were measured differently, not
+that the models differ. The latency and memory spreads are run-to-run noise on
+one machine, not per-subset properties.
+
+The number that matters for deployment is the second-to-last row: a prediction
+costs 100 forward passes, so the MC-dropout averaging dominates, not the
+model. Dropping to 25 passes would cut per-engine cost fourfold and is the
+first thing to try if inference budget is tight.
+
 ## Figures
 
 ```bash
