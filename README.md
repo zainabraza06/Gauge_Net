@@ -38,7 +38,7 @@ ablation/          the study itself
   ensembling.py      eight ways of combining a config's seeds
   stats.py           paired tests between adjacent rungs
   evaluate.py        python -m ablation.evaluate
-  transfer.py        python -m ablation.transfer --source FD002 --target FD004
+  transfer.py        python -m ablation.transfer  (FD002 -> FD004, frozen)
 ```
 
 ## Quick start
@@ -202,24 +202,30 @@ cached in `geom_cache.pkl`, since computing them costs more than training.
 
 ```bash
 python -m ablation.train --datasets FD002 --configs sensor_branch_linear_far
-python -m ablation.transfer --source FD002 --target FD004
+python -m ablation.transfer
 ```
 
-Takes the source seed with the lowest **validation** NASA — the one score not
-measured on test, so selecting on it leaks nothing — and adapts it to the
-target under `frozen` (default), `fine_tuned`, or `discrim_lr`. Every subset
-emits the same 18 features, so a source checkpoint loads with no adapter; what
-differs is how the sensors were normalised, which is the shift being
-transferred across.
+**FD002 → FD004, frozen backbone.** One pair and one strategy, deliberately.
+Both are six-regime subsets normalised the same way, and FD004 adds a second
+fault mode — so the transfer asks whether a representation learned on
+six-regime data carries to six-regime data with an extra failure mode, without
+also changing the normalisation the way an FD001/FD003 pair would.
 
-The head is **reinitialised in every strategy**, frozen included: it was fitted
-to the source subset's RUL distribution, so carrying it over would transfer a
-calibration rather than a representation. Under `frozen` that leaves 10,465 of
-745,984 parameters trainable — 1.4%.
+The source seed is the one with the lowest **validation** NASA — the only
+score not measured on test, so selecting on it leaks nothing. Every subset
+emits the same 18 features, so the checkpoint loads with no adapter.
 
-Transfer numbers mean nothing alone, so the report pairs each strategy against
-the same config trained on the target from scratch, by seed, and says plainly
-when it cannot find that run.
+Freezing everything but the head leaves **10,465 of 745,984 parameters
+trainable (1.4%)**, which is what makes the result readable: if a head alone
+reaches the target's numbers, the source backbone already encodes what FD004
+needs; if it cannot, the gap is in the representation rather than the fit. The
+head is reinitialised after loading — it was fitted to FD002's RUL
+distribution, so carrying it would transfer a calibration, not a
+representation.
+
+Transfer numbers mean nothing alone, so the report pairs them against the same
+config trained on FD004 from scratch, by seed, and says plainly when it cannot
+find that run.
 
 ## Reading the deltas
 
