@@ -24,12 +24,10 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WS = os.path.join(REPO, '.smoke_workspace')
 DATA = os.path.join(WS, 'data')
 OUT = os.path.join(WS, 'results')
-CONFIG = 'full_model'
+CONFIG = 'sensor_branch_linear_far'
 # A second, cheap rung so the paired step-delta table has a pair to compare.
 # Two seeds because the deltas need >=2 shared seeds to be computable at all.
 BASELINE_CONFIG = 'transformer'
-# The top rung, trainable only where the subset carries operating regimes.
-REGIME_CONFIG = 'full_model_regime'
 SEEDS = [42, 43]
 SEED = SEEDS[0]
 SENSORS = ['s2', 's3', 's4', 's7', 's8', 's9', 's11', 's12',
@@ -137,8 +135,8 @@ def main():
     assert not cols - ({'unit', 'cycle', 'rul_true', 'rul'} | set(SENSORS)), sorted(cols)
     print("  [2] preprocessing -> output_FD001_final.pkl, closed schema, checks passed  OK")
 
-    # FD002 exercises the multi-regime path end to end: regime normalisation
-    # in preprocessing, and the regime-conditioned rung in training.
+    # FD002 covers the multi-regime preprocessing path. The staircase itself
+    # is identical on every subset, so it is exercised on FD001 alone.
     if not os.path.exists(os.path.join(DATA, 'train_FD002.txt')):
         write_subset('FD002', multi_regime=True)
     out = run(['-m', 'preprocessing', 'FD002', '--data-root', DATA])
@@ -151,11 +149,9 @@ def main():
     # Per-regime z-scoring must remove the regime offsets: a single global
     # z-score would leave a spread far wider than 1 because the offsets
     # dominate the degradation signal.
-    tr002 = fd002['feature_data']['FD002']['train']
-    vals = tr002[SENSORS].values
+    vals = fd002['feature_data']['FD002']['train'][SENSORS].values
     assert abs(vals.mean()) < 0.05 and abs(vals.std() - 1.0) < 0.05, (vals.mean(), vals.std())
     assert fd002['normalization_stats']['FD002']['scheme'] == 'per-regime'
-    assert set(tr002['regime_id'].unique()) == set(range(6)), sorted(tr002['regime_id'].unique())
     print("  [2b] FD002 -> 6 regimes fitted on train, offsets normalised away  OK")
 
     if not os.path.isdir(os.path.join(OUT, 'FD001')):
@@ -167,46 +163,25 @@ def main():
     train_stub = write_stub('run_train.py', f"""
 import ablation.train as T
 T.EPOCHS = 2; T.WARMUP_EP = 1; T.PATIENCE = 2
-T.run_dataset('FD001', [T.config_by_name(n) for n in ({CONFIG!r}, {BASELINE_CONFIG!r}, {REGIME_CONFIG!r})], {SEEDS!r},
+T.run_dataset('FD001', [T.config_by_name(n) for n in ({CONFIG!r}, {BASELINE_CONFIG!r})], {SEEDS!r},
               data_root=r'{DATA}', out_root=r'{OUT}')
 """)
     out = run([train_stub])
     assert 'TEST_NASA' in out, out[-2000:]
     assert 'features: 14 sensors + 4 geometry available = 18' in out
-    assert 'full_model  (18 features, geometry=True, regime=False)' in out
+    assert 'sensor_branch_linear_far  (18 features, geometry=True, far_attn=linear)' in out
     # transformer trains on the 14 sensors alone: the geometry rung is above
     # it on the ladder, so a config below it must not be fed those columns.
-    assert 'transformer  (14 features, geometry=False, regime=False)' in out
+    assert 'transformer  (14 features, geometry=False, far_attn=full)' in out
     for name in (CONFIG, BASELINE_CONFIG):
         for seed in SEEDS:
             assert os.path.exists(os.path.join(OUT, 'FD001', f'{name}_seed{seed}.pt'))
         assert os.path.exists(os.path.join(OUT, 'FD001', f'{name}_preds.npz'))
     print("  [4] training -> checkpoints + raw predictions, per-rung features correct  OK")
 
-    # FD001 is single-condition, so the regime rung was asked for above and
-    # must have been refused rather than trained on a constant id.
-    assert 'skipping regime-conditioned rung' in out, out[-2000:]
-    assert not os.path.exists(os.path.join(OUT, 'FD001', f'{REGIME_CONFIG}_seed{SEED}.pt'))
-    print("  [5] FD001 -> regime-conditioned rung skipped, single condition  OK")
-
     out = run([train_stub])
     assert 'checkpoint exists, skipping' in out
-    print("  [6] rerun -> existing checkpoint skipped, so runs resume  OK")
-
-    # ... and it must actually train on the multi-regime subset, on 19
-    # features: 14 sensors + 4 geometry + the regime id last.
-    regime_stub = write_stub('run_train_fd002.py', f"""
-import ablation.train as T
-T.EPOCHS = 2; T.WARMUP_EP = 1; T.PATIENCE = 2
-T.run_dataset('FD002', [T.config_by_name({REGIME_CONFIG!r})], [{SEED}],
-              data_root=r'{DATA}', out_root=r'{OUT}')
-""")
-    out = run([regime_stub])
-    assert f'{REGIME_CONFIG}  (19 features, geometry=True, regime=True)' in out, out[-2500:]
-    assert 'skipping regime-conditioned rung' not in out
-    assert 'TEST_NASA' in out, out[-2500:]
-    assert os.path.exists(os.path.join(OUT, 'FD002', f'{REGIME_CONFIG}_seed{SEED}.pt'))
-    print("  [6b] FD002 -> regime rung trains on 19 features, id column last  OK")
+    print("  [5] rerun -> existing checkpoint skipped, so runs resume  OK")
 
     eval_stub = write_stub('run_eval.py', f"""
 import ablation.evaluate as E
@@ -220,7 +195,7 @@ E.run_dataset('FD001', [E.config_by_name(n) for n in ({BASELINE_CONFIG!r}, {CONF
     assert 'trimmed_mean    : SKIPPED (needs >=3 members' in out
     csv = os.path.join(OUT, 'FD001', 'FD001_full_metrics_table.csv')
     assert os.path.exists(csv)
-    print("  [7] evaluate -> scored checkpoints, member-count skips correct  OK")
+    print("  [6] evaluate -> scored checkpoints, member-count skips correct  OK")
 
     # Techniques are tested against the mean per ENGINE, which is where the
     # study actually has power -- unlike the five-seed rung deltas.
@@ -230,11 +205,11 @@ E.run_dataset('FD001', [E.config_by_name(n) for n in ({BASELINE_CONFIG!r}, {CONF
 
     assert f'{BASELINE_CONFIG} -> {CONFIG}' in out, out[-3000:]
     assert 'boot 95% CI=' in out and 'paired-t p=' in out
-    print("  [8] step deltas -> adjacent rungs paired by seed, tests reported  OK")
+    print("  [7] step deltas -> adjacent rungs paired by seed, tests reported  OK")
 
     assert os.path.exists(os.path.join(OUT, 'FD001', 'geom_cache.pkl'))
     assert 'recomputing' not in out
-    print("  [9] geometry cache reused rather than recomputed  OK")
+    print("  [8] geometry cache reused rather than recomputed  OK")
 
     print("\n" + "=" * 70)
     print("SMOKE TEST PASSED -- the clone-and-run path works end to end")

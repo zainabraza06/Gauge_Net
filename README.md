@@ -80,13 +80,13 @@ generates synthetic C-MAPSS-format data and drives all three stages:
 python tests/smoke_test.py
 ```
 
-**A full run needs a GPU.** The ladder is 5 configs x 5 seeds x 2 datasets =
-50 trainings, and `ablation.train` warns if no CUDA device is visible. To
+**A full run needs a GPU.** The ladder is 5 configs x 5 seeds x 4 datasets =
+100 trainings, and `ablation.train` warns if no CUDA device is visible. To
 sanity-check the pipeline on CPU first, run one rung with one seed:
 
 ```bash
-python -m ablation.train --datasets FD001 --configs full_model --seeds 53
-python -m ablation.evaluate --datasets FD001 --configs full_model
+python -m ablation.train --datasets FD001 --configs sensor_branch_linear_far --seeds 53
+python -m ablation.evaluate --datasets FD001 --configs sensor_branch_linear_far
 ```
 
 The first run of a dataset also computes the geometry features, which takes
@@ -110,8 +110,17 @@ differ by that component alone.
 | `near_far` | local path + content-conditioned mixing gate (+ near→far cross-attention) | 14 | 570,656 |
 | `geometry` | Riemannian / Wasserstein drift features | 18 | 571,040 |
 | `sensor_branch` | iTransformer cross-sensor branch + cross-attention fusion | 18 | 745,984 |
-| `full_model` | reverse-time encoding + healthy-window contrast | 18 | 942,209 |
-| `full_model_regime` | learned per-timestep operating-regime embedding — **FD002/FD004 only** | 19 | 942,785 |
+| `sensor_branch_linear_far` | far path swapped to O(n) linear attention — **the settled model** | 18 | 745,984 |
+
+The last step changes no parameter count at all: linear attention swaps four
+projections for four projections. Whatever it does to the score, it does
+without extra capacity, which is the cleanest kind of step this ladder has.
+
+Five components were tried and are **not** rungs — a conv (TCN) baseline, an
+FFT spectral gate, a reverse-time encoding, a healthy-window contrast, and
+regime conditioning. `ablation/configs.py` records why each left; the short
+version is that a rung has to be one component, has to move the metric beyond
+seed noise, and has to be walkable on every subset.
 
 A rung's name is its checkpoint filename prefix (`<name>_seed<seed>.pt`), so
 renaming one orphans its checkpoints.
@@ -137,14 +146,10 @@ settings. No fault-mode label is emitted or used anywhere — FD003 and FD004
 have two modes each, and the model is expected to infer the mode from the
 trajectory.
 
-`full_model_regime` is the one rung that is not universal. Per-regime
-z-scoring removes each regime's mean, and with it *which* condition a row was
-recorded in, so that rung embeds the regime id per timestep and adds it back
-to the projected features. The id rides as the **last** column of the feature
-tensor and the model splits it off by position, so it must stay last. On
-FD001/FD003 the rung is skipped — one constant id would make it `full_model`
-with dead parameters under a name implying a comparison nobody ran — and the
-skip keys off the column being present, not off a subset name.
+The regimes are handled entirely in preprocessing. An earlier version also
+fed the regime id to the model as a learned embedding; it is gone, because a
+rung FD001/FD003 cannot walk is not a rung, and the staircase is the same five
+steps on all four subsets.
 
 The pipeline declares which scheme a subset gets and then **cross-checks it
 against the measured op-condition variance**, failing in either direction, so
