@@ -39,6 +39,7 @@ ablation/          the study itself
   stats.py           paired tests between adjacent rungs
   evaluate.py        python -m ablation.evaluate
   transfer.py        python -m ablation.transfer  (FD002 -> FD004, frozen)
+  figures.py         python -m ablation.figures  (report PNGs)
 ```
 
 ## Quick start
@@ -198,6 +199,29 @@ Riemannian pair responds to changes in coupling *between* sensors, the
 Wasserstein pair to changes in each sensor's own distribution. They are
 cached in `geom_cache.pkl`, since computing them costs more than training.
 
+## Figures
+
+```bash
+python -m ablation.evaluate           # writes <config>_ensemble_preds.npz
+python -m ablation.figures            # draws from those, never re-runs inference
+```
+
+Per dataset: error histogram with a Gaussian fit, predicted-vs-true scatter,
+absolute error against true RUL, and NASA per ensembling technique. Across
+datasets: a NASA/RMSE summary and an error-spread boxplot. Because the figures
+read the same saved predictions the tables do, a figure cannot disagree with
+the CSV beside it.
+
+Two deliberate choices. The over-prediction side is shaded on the error plots,
+since NASA charges `e^(e/10)` for predicting too much life against `e^(-e/13)`
+for too little and a symmetric-looking histogram hides that. And the
+cross-dataset NASA panel prints the engine count on each bar, because NASA is
+a **sum** — those bars are not comparable between datasets of different size,
+and the figure says so rather than leaving it to a caption.
+
+There is no radar chart: accuracies, R² and reciprocal errors on shared axes
+produce an area whose size changes with the metric ordering.
+
 ## Transfer between subsets
 
 ```bash
@@ -234,9 +258,15 @@ every rung trains on the same seed list, and a seed fixes the validation
 split, the end-of-life trim and the initialisation, so a pair differs by the
 component under test alone.
 
-Four things are reported per step — paired t-test, Wilcoxon, Cohen's d, and a
-bootstrap 95% CI on the mean difference — because no one of them is
-trustworthy at five seeds. In particular **Wilcoxon cannot return p < 0.05
+A Friedman omnibus test runs first, across all rungs at once: four steps each
+tested at 0.05 make a false positive somewhere likely, so whether the rungs
+differ **at all** is worth knowing before any single step is read as settled.
+Kendall's W says how consistently the seeds rank the rungs the same way.
+
+Then, per step — paired t-test, Wilcoxon, Cohen's d, a bootstrap 95% CI on the
+mean difference, and a Shapiro-Wilk p on the paired differences (a check on
+the t-test's assumption, not a gate) — because no one of them is trustworthy
+at five seeds. In particular **Wilcoxon cannot return p < 0.05
 with five pairs at all** (its smallest attainable two-sided p is 0.0625), so a
 non-significant Wilcoxon here is not evidence of no effect. Read the effect
 size and whether the interval excludes zero.
