@@ -21,11 +21,11 @@ import os
 import numpy as np
 
 from model.config import DEVICE, DATA_ROOT, OUT_ROOT, DATASETS
-from model.data import load_subset, features_for, has_regimes
+from model.data import load_subset, features_for
 from model.inference import discover_seeds, evaluate_checkpoint
 from model.metrics import ACC_THRESHOLDS
 
-from .configs import CONFIGS, applicable_configs, config_by_name
+from .configs import CONFIGS, config_by_name
 from .ensembling import run_ensembling_suite
 from .stats import DIFF_CONVENTION, format_comparison, paired_comparison
 
@@ -115,11 +115,6 @@ def run_dataset(subset, configs, data_root=None, out_root=None):
 
     traj_fn, geom_cols, tr_c, te_c, rul_true, fml = load_subset(
         subset, cache_dir=out_dir, data_root=data_root, out_root=out_root)
-
-    configs, dropped = applicable_configs(configs, has_regimes(tr_c))
-    if dropped:
-        print(f"  {subset} has one operating condition -- skipping regime-conditioned "
-              f"rung(s): {dropped}")
 
     all_ensembles = {}
     csv_rows = []

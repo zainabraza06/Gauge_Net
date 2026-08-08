@@ -6,38 +6,44 @@ two adjacent rows is attributable to that component alone. Nothing is ever
 removed on the way up, which is what makes the ladder cumulative rather than
 a leave-one-out study.
 
-  transformer    a single full-causal attention path over the 14 raw
-                 sensors. The reference every rung above is measured from.
-  near_far       + the second, local path and the content-conditioned gate
-                 that mixes them, including the last block's near->far
-                 cross-attention. That cross-attention belongs to the
-                 dual-path design itself, so every rung above carries it too,
-                 not only the full model.
-  geometry       + the 4 Riemannian / Wasserstein drift features (18 total).
-  sensor_branch  + the iTransformer-style cross-sensor branch and its
-                 cross-attention fusion.
-  full_model     + the reverse-time encoding and the healthy-window contrast.
-  full_model_regime
-                 + a learned embedding of the operating regime, added per
-                 timestep. MULTI-REGIME SUBSETS ONLY (FD002, FD004): the
-                 per-regime z-score removes each regime's mean, and with it
-                 which flight condition a row was recorded in, so this hands
-                 that back. On FD001/FD003 every row is one regime, so the
-                 rung is skipped rather than trained on a constant.
+  transformer               a single full-causal attention path over the 14
+                            raw sensors. The reference every rung is measured
+                            from.
+  near_far                  + the second, local path and the content-
+                            conditioned gate that mixes them, including the
+                            last block's near->far cross-attention. That
+                            cross-attention belongs to the dual-path design
+                            itself, so every rung above carries it too.
+  geometry                  + the 4 Riemannian / Wasserstein drift features
+                            (18 features in total).
+  sensor_branch             + the iTransformer-style cross-sensor branch and
+                            its cross-attention fusion.
+  sensor_branch_linear_far  the far path swapped from exact quadratic
+                            attention to the O(n) linear approximation. The
+                            settled model.
 
-Neither the TCN baseline nor the spectral gate is a rung. The convolutional
-baseline was dropped: the study is about what the attention architecture's
-components contribute, and a conv encoder differs from the transformer rungs
-in too many ways at once for the step above it to attribute anything.
+The rungs that are NOT here were all tried and dropped, and the reasons are
+worth keeping because each is a different kind of negative result:
 
-The spectral gate is not a rung either. An FFT band-energy gate was run over 5
-seeds on both subsets, in two placements, and never moved NASA/RMSE/MAE beyond
-seed noise, so the ladder has nothing to say about it.
+  tcn_baseline         a conv encoder differs from the transformer rungs in
+                       too many ways at once for the step above it to
+                       attribute anything to one component.
+  spectral gate        an FFT band-energy gate never moved NASA/RMSE/MAE
+                       beyond seed noise, over 5 seeds and two placements.
+  reverse-time path    doubled the temporal parameters and did not survive as
+                       the ladder was rebuilt around the sensor branch.
+  healthy-window       the sensor branch subsumes it: both answer "how does
+                       this engine differ from healthy", and the branch does
+                       it from the window alone.
+  regime conditioning  an embedding of the flight regime, on FD002/FD004
+                       only. A rung every dataset cannot walk is not a rung;
+                       the staircase is the same five steps on all four
+                       subsets, and the regimes are handled where they arise,
+                       in the per-regime normalisation.
 
-RUN_ORDER, not this list, decides what trains first: full_model runs first so
-the headline numbers exist early, while the paired step-by-step deltas are
-always computed down THIS list, in progressive-complexity order. Reordering
-CONFIGS would silently change which pairs the delta table compares.
+RUN_ORDER, not this list, decides what trains first. The paired step-by-step
+deltas are always computed down THIS list, in progressive-complexity order --
+reordering CONFIGS would silently change which pairs the delta table compares.
 
 A rung's name is its checkpoint filename prefix (<name>_seed<seed>.pt), so
 renaming a rung orphans its checkpoints.
@@ -45,25 +51,21 @@ renaming a rung orphans its checkpoints.
 
 CONFIGS = [
     dict(name='transformer', backbone='far_only', use_geometry=False,
-         use_sensor_branch=False, use_reverse=False, use_healthy=False),
+         use_sensor_branch=False, far_attn_type='full'),
     dict(name='near_far', backbone='both', use_geometry=False,
-         use_sensor_branch=False, use_reverse=False, use_healthy=False),
+         use_sensor_branch=False, far_attn_type='full'),
     dict(name='geometry', backbone='both', use_geometry=True,
-         use_sensor_branch=False, use_reverse=False, use_healthy=False),
+         use_sensor_branch=False, far_attn_type='full'),
     dict(name='sensor_branch', backbone='both', use_geometry=True,
-         use_sensor_branch=True, use_reverse=False, use_healthy=False),
-    dict(name='full_model', backbone='both', use_geometry=True,
-         use_sensor_branch=True, use_reverse=True, use_healthy=True),
-    dict(name='full_model_regime', backbone='both', use_geometry=True,
-         use_sensor_branch=True, use_reverse=True, use_healthy=True,
-         use_regime=True),
+         use_sensor_branch=True, far_attn_type='full'),
+    dict(name='sensor_branch_linear_far', backbone='both', use_geometry=True,
+         use_sensor_branch=True, far_attn_type='linear'),
 ]
 
-# Training order only. Analysis always walks CONFIGS. full_model_regime is
-# last in both: it is the top of the staircase, so running it early would put
-# a rung before the one it is measured against.
-RUN_ORDER = ['full_model', 'transformer', 'near_far', 'geometry',
-             'sensor_branch', 'full_model_regime']
+# Training order only. Analysis always walks CONFIGS. The settled model runs
+# first so its numbers exist early, then the staircase fills in beneath it.
+RUN_ORDER = ['sensor_branch_linear_far', 'transformer', 'near_far', 'geometry',
+             'sensor_branch']
 
 SEEDS = [53, 51, 43, 42, 3]
 
@@ -75,23 +77,8 @@ def config_by_name(name):
     raise KeyError(f"unknown config {name!r}; known: {[c['name'] for c in CONFIGS]}")
 
 
-def applicable_configs(configs, subset_has_regimes):
-    """Drops the rungs a subset cannot support.
-
-    Only full_model_regime is conditional: on a single-condition subset its
-    embedding would index one constant id, so it would be full_model with a
-    few dead parameters and a rung name implying a comparison that was never
-    made. Skipping is reported by the caller rather than done silently.
-    """
-    if subset_has_regimes:
-        return list(configs), []
-    keep = [c for c in configs if not c.get('use_regime')]
-    dropped = [c['name'] for c in configs if c.get('use_regime')]
-    return keep, dropped
-
-
 def configs_in_run_order(configs=None):
-    """Orders configs for TRAINING: full_model first, then the staircase.
+    """Orders configs for TRAINING: the settled model first, then the rest.
 
     Anything not named in RUN_ORDER keeps its position at the end, so a config
     added to CONFIGS still trains even if RUN_ORDER was not updated.

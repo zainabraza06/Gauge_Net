@@ -2,7 +2,7 @@
 Trains every rung of the ablation ladder, for every seed, on every dataset.
 
     python -m ablation.train
-    python -m ablation.train --datasets FD002 --configs full_model_regime
+    python -m ablation.train --datasets FD002 --configs sensor_branch_linear_far
 
 Checkpoints go to OUT_ROOT/<dataset>/<config>_seed<seed>.pt, which is the
 layout ablation.evaluate discovers. A rung that already has a checkpoint for a
@@ -28,19 +28,19 @@ from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR, SequentialLR
 from torch.utils.data import DataLoader
 
 from model.config import (DEVICE, DATA_ROOT, OUT_ROOT, SCALE, LR, LR_MIN, WD, GRAD_CLIP,
-                          EPOCHS, WARMUP_EP, BATCH, PATIENCE, MC_PASSES_VAL, DATASETS)
-from model.data import load_subset, features_for, has_regimes
+                          EPOCHS, WARMUP_EP, BATCH, PATIENCE, MC_PASSES_VAL, DATASETS,
+                          patience_for)
+from model.data import load_subset, features_for
 from model.igrfnet import build_model
 from model.inference import mc_predict, predict_test_set
 from model.losses import asym_huber
 from model.metrics import nasa_score, all_metrics, ACC_THRESHOLDS
 from model.windows import RULDataset, collate, build_val_snapshots, val_engines_for_seed
 
-from .configs import (CONFIGS, SEEDS, applicable_configs, config_by_name,
-                      configs_in_run_order)
+from .configs import CONFIGS, SEEDS, config_by_name, configs_in_run_order
 
 
-def train_one_seed(seed, fn, tr_c, te_c, rul_true, fml, ckpt, cfg, tag=''):
+def train_one_seed(seed, fn, tr_c, te_c, rul_true, fml, ckpt, cfg, tag='', patience=PATIENCE):
     """Trains one (config, seed) member and returns its test metrics."""
     val_eng = val_engines_for_seed(tr_c, seed)
     df_tr = tr_c[~tr_c['unit'].isin(val_eng)]
@@ -55,9 +55,8 @@ def train_one_seed(seed, fn, tr_c, te_c, rul_true, fml, ckpt, cfg, tag=''):
 
     dl_tr = DataLoader(RULDataset(df_tr, fn, fml, True, seed), BATCH, shuffle=True,
                        collate_fn=collate, num_workers=0)
-    val_win, val_rul, val_lf, val_hwin, val_hlf, val_hgate = build_val_snapshots(df_va, fn, fml, seed)
+    val_win, val_rul, val_lf = build_val_snapshots(df_va, fn, fml, seed)
     val_win, val_rul, val_lf = val_win.to(DEVICE), val_rul.to(DEVICE), val_lf.to(DEVICE)
-    val_hwin, val_hlf, val_hgate = val_hwin.to(DEVICE), val_hlf.to(DEVICE), val_hgate.to(DEVICE)
 
     opt = AdamW(model.parameters(), lr=LR, weight_decay=WD)
     # Warmup then cosine decay: the gate and blend parameters are unstable at
@@ -66,19 +65,15 @@ def train_one_seed(seed, fn, tr_c, te_c, rul_true, fml, ckpt, cfg, tag=''):
                                CosineAnnealingLR(opt, T_max=EPOCHS - WARMUP_EP, eta_min=LR_MIN)],
                          milestones=[WARMUP_EP])
 
-    use_healthy = cfg['use_healthy']
     best_vn = float('inf')
     no_imp = 0
     t0 = time.time()
     epoch = 0
     for epoch in range(1, EPOCHS + 1):
         model.train()
-        for feats, rul_s, lf, hwin, hlf, hgate in dl_tr:
+        for feats, rul_s, lf in dl_tr:
             feats, rul_s, lf = feats.to(DEVICE), rul_s.to(DEVICE), lf.to(DEVICE)
-            hwin, hlf, hgate = hwin.to(DEVICE), hlf.to(DEVICE), hgate.to(DEVICE)
-            pred = model(feats, lf,
-                         x_healthy=hwin if use_healthy else None,
-                         lf_healthy=hlf, healthy_gate=hgate)
+            pred = model(feats, lf)
             # Unweighted: the loss ablation preferred this to both weighted
             # variants tried, so every row counts the same.
             loss = asym_huber(pred, rul_s).mean()
@@ -90,19 +85,17 @@ def train_one_seed(seed, fn, tr_c, te_c, rul_true, fml, ckpt, cfg, tag=''):
 
         model.eval()
         with torch.no_grad():
-            p = mc_predict(model, val_win, val_lf,
-                           x_healthy=val_hwin if use_healthy else None,
-                           lf_healthy=val_hlf, healthy_gate=val_hgate, M=MC_PASSES_VAL)
+            p = mc_predict(model, val_win, val_lf, M=MC_PASSES_VAL)
             vn = nasa_score(p.cpu().numpy() * SCALE, val_rul.cpu().numpy())
         if vn < best_vn:
             best_vn, no_imp = vn, 0
             torch.save(model.state_dict(), ckpt)
         else:
             no_imp += 1
-        if epoch % 20 == 0 or no_imp >= PATIENCE:
+        if epoch % 20 == 0 or no_imp >= patience:
             print(f"    [{tag} seed{seed}] epoch {epoch:3d}/{EPOCHS}  val_NASA={vn:.2f}  "
                   f"best={best_vn:.2f}  no_improve={no_imp}")
-        if no_imp >= PATIENCE:
+        if no_imp >= patience:
             break
     train_seconds = time.time() - t0
 
@@ -137,13 +130,9 @@ def run_dataset(subset, configs, seeds, overwrite=False, data_root=None, out_roo
 
     traj_fn, geom_cols, tr_c, te_c, rul_true, fml = load_subset(
         subset, cache_dir=out_dir, data_root=data_root, out_root=out_root)
+    patience = patience_for(subset)
     print(f"  train engines: {tr_c['unit'].nunique()}  "
-          f"|  test engines: {te_c['unit'].nunique()}")
-
-    configs, dropped = applicable_configs(configs, has_regimes(tr_c))
-    if dropped:
-        print(f"  {subset} has one operating condition -- skipping regime-conditioned "
-              f"rung(s): {dropped}")
+          f"|  test engines: {te_c['unit'].nunique()}  |  patience: {patience} epochs")
 
     all_results = {}
     # Trained full-model-first; the analysis stages always walk CONFIGS order.
@@ -151,8 +140,8 @@ def run_dataset(subset, configs, seeds, overwrite=False, data_root=None, out_roo
         name = cfg['name']
         fn = features_for(cfg, traj_fn, geom_cols)
         print(f"\n{'=' * 70}\nCONFIG = {name}  ({len(fn)} features, "
-              f"geometry={cfg['use_geometry']}, regime={cfg.get('use_regime', False)})"
-              f"\n{'=' * 70}")
+              f"geometry={cfg['use_geometry']}, "
+              f"far_attn={cfg.get('far_attn_type', 'full')})\n{'=' * 70}")
         all_results[name] = []
         for seed in seeds:
             ckpt = os.path.join(out_dir, f'{name}_seed{seed}.pt')
@@ -161,7 +150,7 @@ def run_dataset(subset, configs, seeds, overwrite=False, data_root=None, out_roo
                       f"(use --overwrite to retrain)")
                 continue
             r = train_one_seed(seed, fn, tr_c, te_c, rul_true, fml, ckpt, cfg,
-                               tag=f'{subset}_{name}')
+                               tag=f'{subset}_{name}', patience=patience)
             all_results[name].append(r)
             with open(os.path.join(out_dir, f'{name}_results.pkl'), 'wb') as f:
                 pickle.dump(all_results[name], f)
