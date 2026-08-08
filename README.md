@@ -40,7 +40,6 @@ ablation/          the study itself
   evaluate.py        python -m ablation.evaluate
   transfer.py        python -m ablation.transfer  (FD002 -> FD004, frozen)
   figures.py         python -m ablation.figures  (report PNGs)
-  posthoc.py         python -m ablation.posthoc  (write-up statistics)
 ```
 
 ## Quick start
@@ -199,30 +198,6 @@ against **the engine's own history** (`riem_personal`, `was_personal`). The
 Riemannian pair responds to changes in coupling *between* sensors, the
 Wasserstein pair to changes in each sensor's own distribution. They are
 cached in `geom_cache.pkl`, since computing them costs more than training.
-
-## Post-hoc statistics
-
-```bash
-python -m ablation.posthoc                    # reports val_weighted by default
-python -m ablation.posthoc --ensemble mean
-```
-
-Reads saved results only — no torch, no checkpoints. Three parts: **A** direct
-training per dataset (does the reported ensemble beat the plain mean paired
-per engine; seed spread with CV; bootstrap CIs; error normality), **B** the
-same for the transfer arm, **C** transfer against direct training on FD004,
-paired per engine — the one comparison needing both pipelines.
-
-Two things it refuses to fake. NASA's bootstrap CI resamples engines at the
-original count, since NASA is a **sum** and a shorter resample would shrink it
-for reasons unrelated to the model. And the cross-dataset section prints
-spreads rather than a Friedman test: seed 53 on FD001 and on FD004 share an
-RNG value and nothing else, so a repeated-measures test there would attach a
-p-value to an arbitrary pairing.
-
-Error non-normality is expected, not a fault — the RUL cap piles labels at 125
-and the loss is deliberately asymmetric. It is reported because it says which
-summaries are safe to quote.
 
 ## Figures
 
