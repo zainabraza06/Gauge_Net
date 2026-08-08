@@ -36,6 +36,7 @@ order, and none of the axes share units.
 
 import argparse
 import os
+import pickle
 
 import matplotlib
 matplotlib.use('Agg')          # headless: figures are written, never shown
@@ -47,6 +48,8 @@ from model.config import DATA_ROOT, OUT_ROOT, RUL_CAP, DATASETS
 from model.data import raw_path
 from model.metrics import all_metrics
 
+from . import figures_seeds as FS
+
 SETTLED_CONFIG = 'sensor_branch_linear_far'
 DPI = 160
 BLUE, ORANGE, GREEN, RED = '#4C72B0', '#DD8452', '#55A868', '#C44E52'
@@ -56,6 +59,15 @@ def figure_dir(out_root, subset=None):
     d = os.path.join(out_root, 'figures', subset) if subset else os.path.join(out_root, 'figures')
     os.makedirs(d, exist_ok=True)
     return d
+
+
+def load_members(subset, config, out_root):
+    """Per-seed results, for the figures that need individual members."""
+    path = os.path.join(out_root, subset, f'{config}_results.pkl')
+    if not os.path.exists(path):
+        return None
+    with open(path, 'rb') as f:
+        return pickle.load(f)
 
 
 def load_predictions(subset, config, out_root, data_root):
@@ -193,6 +205,14 @@ def plot_error_spread(per_subset, out_root):
     return _save(fig, figure_dir(out_root), 'error_spread')
 
 
+def _saver(out_root):
+    """A save(fig, name[, subset]) callable for the seed-level figures, so
+    they need no knowledge of where output lives."""
+    def save(fig, name, subset=None):
+        return _save(fig, figure_dir(out_root, subset), name)
+    return save
+
+
 def _save(fig, directory, name):
     path = os.path.join(directory, f'{name}.png')
     fig.tight_layout()
@@ -217,18 +237,32 @@ def run(subsets, config=SETTLED_CONFIG, data_root=None, out_root=None):
             continue
 
         pred = preds['mean']
-        per_subset[subset] = dict(pred=pred, rul_true=rul_true,
-                                  metrics=all_metrics(pred, rul_true))
+        members = load_members(subset, config, out_root)
+        per_subset[subset] = dict(
+            pred=pred, rul_true=rul_true, all_preds=preds,
+            metrics=all_metrics(pred, rul_true),
+            seed_scores=[{k: m[k] for k in ('nasa', 'rmse')} for m in members or []],
+            seed_preds={m['seed']: np.asarray(m['preds']) for m in members or []})
         written = [plot_error_hist(subset, pred, rul_true, out_root),
                    plot_scatter(subset, pred, rul_true, out_root),
                    plot_error_by_true(subset, pred, rul_true, out_root),
                    plot_ensembles(subset, preds, rul_true, out_root)]
+        if per_subset[subset]['seed_preds']:
+            written.append(FS.plot_seed_diversity(
+                plt, subset, per_subset[subset]['seed_preds'], rul_true,
+                _saver(out_root)))
         print(f"  {subset}: {len(written)} figures -> {os.path.dirname(written[0])}")
 
     if len(per_subset) >= 2:
+        save = _saver(out_root)
         for path in (plot_cross_dataset(per_subset, out_root),
-                     plot_error_spread(per_subset, out_root)):
-            print(f"  cross-dataset: {path}")
+                     plot_error_spread(per_subset, out_root),
+                     FS.plot_seed_variance(plt, per_subset, save, 'nasa'),
+                     FS.plot_seed_variance(plt, per_subset, save, 'rmse'),
+                     FS.plot_ensembling_forest(plt, per_subset, save),
+                     FS.plot_technique_ranks(plt, per_subset, save)):
+            if path:
+                print(f"  cross-dataset: {path}")
     elif per_subset:
         print("  cross-dataset figures need >=2 datasets with predictions -- skipped")
 
