@@ -38,6 +38,7 @@ ablation/          the study itself
   ensembling.py      eight ways of combining a config's seeds
   stats.py           paired tests between adjacent rungs
   evaluate.py        python -m ablation.evaluate
+  transfer.py        python -m ablation.transfer --source FD002 --target FD004
 ```
 
 ## Quick start
@@ -196,6 +197,29 @@ against **the engine's own history** (`riem_personal`, `was_personal`). The
 Riemannian pair responds to changes in coupling *between* sensors, the
 Wasserstein pair to changes in each sensor's own distribution. They are
 cached in `geom_cache.pkl`, since computing them costs more than training.
+
+## Transfer between subsets
+
+```bash
+python -m ablation.train --datasets FD002 --configs sensor_branch_linear_far
+python -m ablation.transfer --source FD002 --target FD004
+```
+
+Takes the source seed with the lowest **validation** NASA — the one score not
+measured on test, so selecting on it leaks nothing — and adapts it to the
+target under `frozen` (default), `fine_tuned`, or `discrim_lr`. Every subset
+emits the same 18 features, so a source checkpoint loads with no adapter; what
+differs is how the sensors were normalised, which is the shift being
+transferred across.
+
+The head is **reinitialised in every strategy**, frozen included: it was fitted
+to the source subset's RUL distribution, so carrying it over would transfer a
+calibration rather than a representation. Under `frozen` that leaves 10,465 of
+745,984 parameters trainable — 1.4%.
+
+Transfer numbers mean nothing alone, so the report pairs each strategy against
+the same config trained on the target from scratch, by seed, and says plainly
+when it cannot find that run.
 
 ## Reading the deltas
 
