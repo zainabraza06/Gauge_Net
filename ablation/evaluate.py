@@ -27,7 +27,7 @@ from model.metrics import ACC_THRESHOLDS
 
 from .configs import CONFIGS, config_by_name
 from .ensembling import run_ensembling_suite
-from .stats import DIFF_CONVENTION, format_comparison, paired_comparison
+from .stats import DIFF_CONVENTION, format_comparison, friedman, paired_comparison
 
 CSV_COLS = (['dataset', 'config', 'technique', 'n_members', 'n_params',
              'nasa', 'rmse', 'mae', 'mean_error', 'mape', 'r2']
@@ -59,6 +59,22 @@ def print_step_deltas(subset, configs, per_seed):
     print(f"  sign: {DIFF_CONVENTION}")
     print("  n=5 seeds is low-powered: Wilcoxon cannot reach p<0.05 at n=5 at all, so read")
     print("  the effect size and whether the bootstrap interval excludes zero, not the p-values.")
+
+    # Omnibus first: four steps tested at 0.05 make a false positive somewhere
+    # likely, so whether the rungs differ AT ALL is worth knowing before
+    # reading any single step as settled.
+    common = [c['name'] for c in configs if c['name'] in per_seed]
+    if len(common) >= 3:
+        seeds_all = set.intersection(*(set(per_seed[n]) for n in common))
+        if len(seeds_all) >= 3:
+            order = sorted(seeds_all)
+            fr = friedman({n: [per_seed[n][s]['nasa'] for s in order] for n in common})
+            if fr:
+                verdict = ('rungs differ' if fr['p'] < 0.05 else
+                           'no difference detected across rungs')
+                print(f"\n  omnibus (Friedman, NASA, {fr['k']} rungs x {fr['n']} seeds): "
+                      f"chi2={fr['chi2']:.2f}  p={fr['p']:.4f}  "
+                      f"Kendall's W={fr['kendalls_w']:.2f} -- {verdict}")
 
     for prev_cfg, cur_cfg in zip(configs, configs[1:]):
         prev, cur = prev_cfg['name'], cur_cfg['name']
