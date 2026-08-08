@@ -213,16 +213,6 @@ def build(subset, data_dir, output_dir):
     te_traj = te_raw[['unit', 'cycle']].copy()
     tr_traj[SELECTED] = tr_vals
     te_traj[SELECTED] = te_vals
-    if per_regime:
-        # Emitted so a model can CONDITION on the flight regime, not just be
-        # normalised by it: per-regime z-scoring removes each regime's mean,
-        # which also removes the information about which regime a row was
-        # flown in. The assignment is written down here rather than recovered
-        # downstream from the raw files, so there is one implementation of it
-        # and no chance of a re-derived id disagreeing with the one the
-        # statistics were applied under.
-        tr_traj['regime_id'] = tr_regime.astype(np.float32)
-        te_traj['regime_id'] = te_regime.astype(np.float32)
     print(f"  train mean~{tr_traj[SELECTED].values.mean():.3f} "
           f"std~{tr_traj[SELECTED].values.std():.3f}")
     print("  no baseline features: ablated directly, worse TEST_NASA on both "
@@ -252,9 +242,6 @@ def build(subset, data_dir, output_dir):
         # with loaders that concatenate trajectory + baseline + geometry.
         'baseline_feature_names': {subset: []},
         'feature_data': {subset: {'train': train_feat, 'test': test_feat}},
-        'weighting_config': {'rul_cap': RUL_CAP,
-                             'scheme': 'none -- unweighted asym_huber'},
-        'asymmetric_loss_config': {'h1': 13.0, 'h2': 10.0},
         'normalization_stats': {subset: norm_stats},
     }
 
@@ -291,14 +278,12 @@ def verify(train_feat, test_feat, feature_cols, base_feature_names, single_condi
 
     # The emitted schema is closed: anything beyond these columns means a dead
     # column has crept back in and downstream feature counts can drift.
-    # regime_id is allowed on the multi-regime subsets ONLY -- it is a live
-    # input there, and meaningless where every row is one regime.
+    # The same schema on every subset: what differs between them is how the
+    # sensors were normalised, not what the model is handed.
     expected = {'unit', 'cycle', 'rul_true', 'rul'} | set(SELECTED)
-    if per_regime:
-        expected.add('regime_id')
     extra = set(train_feat.columns) - expected
-    print(f"  emits trajectory + RUL{' + regime_id' if per_regime else ''} only: "
-          f"{not extra}  {'OK' if not extra else f'FAIL {extra}'}")
+    print(f"  emits trajectory + RUL only: {not extra}  "
+          f"{'OK' if not extra else f'FAIL {extra}'}")
     if extra:
         issues.append(f'unexpected columns emitted: {sorted(extra)}')
 
