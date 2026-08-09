@@ -1,10 +1,11 @@
 """
 Combining the seeds of one config into a single prediction.
 
-Each seed is an ensemble MEMBER. The techniques differ in what they use to
-combine members: nothing (mean, median), each member's validation score
-(trimmed_mean, val_weighted, softmax_*), or only the ordering members induce
-(rank_average).
+Each seed is an ensemble MEMBER. Five techniques, the set the study reports:
+
+  mean, median          use nothing but the predictions themselves
+  val_weighted          weight inversely to each member's validation NASA
+  softmax_sharp/_soft   weight by softmax over -val_NASA, at two temperatures
 
 A technique that cannot be fitted from the members found is skipped WITH A
 REASON rather than dropped silently, so a missing row in the results table is
@@ -15,19 +16,33 @@ validation split, since every seed holds out different engines. The scores
 are comparable enough to rank members, but they carry split difficulty as
 well as model quality and should not be read as calibrated estimates.
 
-Affine recalibration of the mean ensemble ('bias_corrected') was dropped. It
-fit a correction from pooled validation residuals and applied it to test
-predictions, which is a second model fitted on data the members had already
-been selected on -- a per-technique free parameter that none of the other
-techniques get, and one whose benefit could not be separated from that
-advantage.
+Four candidates are NOT here, each for its own reason:
 
-Ridge stacking is deliberately absent. Fitting per-member blend weights needs
-a snapshot set that every member can be scored on and that none of them
-trained on, i.e. the engines held out by ALL members. With five seeds holding
-out 20% each that intersection is empty in practice, so the technique could
-never be fitted on this design without either leaking a member's training
-data into its own weight or misaligning the columns.
+  trimmed_mean     dropping the worst members by validation score is a third
+                   way of spending the same signal val_weighted and the
+                   softmax pair already spend, and it never separated from
+                   them; the reported suite keeps the two that differ in how
+                   sharply they concentrate weight, not three that differ in
+                   nothing.
+
+  rank_average     combines members through their ORDERING of the engines
+                   rather than their predicted values. A different kind of
+                   answer to a different question, and outside the reported
+                   suite.
+
+  bias_corrected   fit an affine correction from pooled validation residuals
+                   and applied it to test predictions -- a second model fitted
+                   on data the members had already been selected on, a free
+                   parameter no other technique gets, and one whose benefit
+                   could not be separated from that advantage.
+
+  ridge stacking   fitting per-member blend weights needs a snapshot set every
+                   member can be scored on and none of them trained on, i.e.
+                   the engines held out by ALL members. With five seeds
+                   holding out 20% each that intersection is empty in
+                   practice, so it could never be fitted on this design
+                   without either leaking a member's training data into its
+                   own weight or misaligning the columns.
 """
 
 import numpy as np
@@ -46,8 +61,6 @@ def run_ensembling_suite(members, rul_true):
     technique against another on per-engine errors, which a reduced metric
     can no longer support.
     """
-    n_members = len(members)
-    n_items = len(rul_true)
     pred_matrix = np.stack([r['preds'] for r in members], axis=0)
     val_nasas = np.array([r['best_val_nasa'] for r in members])
     combined = {}
@@ -55,17 +68,6 @@ def run_ensembling_suite(members, rul_true):
 
     combined['mean'] = pred_matrix.mean(axis=0)
     combined['median'] = np.median(pred_matrix, axis=0)
-
-    # trimmed_mean -- mean of the members with the best validation NASA,
-    # dropping the worst ~20%. One-sided despite the name: nothing is trimmed
-    # off the good end, since there is no reason to discard the best member.
-    n_drop = max(1, int(n_members * 0.2)) if n_members >= 3 else 0
-    if n_drop > 0:
-        keep_idx = np.argsort(val_nasas)[:n_members - n_drop]
-        combined['trimmed_mean'] = pred_matrix[keep_idx].mean(axis=0)
-    else:
-        combined['trimmed_mean'] = None
-        skip_reasons['trimmed_mean'] = 'needs >=3 members to drop one'
 
     # val_weighted -- weight inversely to validation NASA (lower is better).
     inv_w = 1.0 / np.maximum(val_nasas, 1e-6)
@@ -77,24 +79,6 @@ def run_ensembling_suite(members, rul_true):
         z = -val_nasas / tau
         sm_w = np.exp(z - z.max())
         combined[name] = (pred_matrix * (sm_w / sm_w.sum())[:, None]).sum(axis=0)
-
-    # rank_average -- each member ranks the ENGINES it scored, those ranks are
-    # averaged across members, and the average rank is mapped back onto the
-    # sorted mean-prediction scale. Using only each member's ORDERING means a
-    # member whose RUL scale is miscalibrated but whose ordering is right
-    # still contributes usefully.
-    #
-    # Ranking across MEMBERS instead (axis=0) is degenerate: every engine's
-    # rank column is a permutation of 0..n_members-1, so the mean rank is the
-    # constant (n_members-1)/2 for every engine and the result is identically
-    # the median, whatever the predictions are.
-    if n_members >= 2 and n_items >= 2:
-        ranks = np.argsort(np.argsort(pred_matrix, axis=1), axis=1).astype(np.float64)
-        combined['rank_average'] = np.interp(ranks.mean(axis=0), np.arange(n_items),
-                                             np.sort(pred_matrix.mean(axis=0)))
-    else:
-        combined['rank_average'] = None
-        skip_reasons['rank_average'] = 'needs >=2 members and >=2 engines'
 
     results = {name: (all_metrics(p, rul_true) if p is not None else None)
                for name, p in combined.items()}

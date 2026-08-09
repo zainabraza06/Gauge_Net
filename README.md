@@ -537,7 +537,7 @@ model/             everything shared by training and evaluation
 ablation/          the study itself
   configs.py         the five-rung cumulative ladder + training run order
   train.py           python -m ablation.train
-  ensembling.py      seven ways of combining a config's seeds
+  ensembling.py      five ways of combining a config's seeds
   stats.py           paired tests between adjacent rungs + Friedman omnibus
   evaluate.py        python -m ablation.evaluate
   transfer.py        python -m ablation.transfer   (FD002 -> FD004, frozen)
@@ -622,12 +622,14 @@ renaming one orphans its checkpoints.
 
 ## Ensembling
 
-The five seeds of one config are combined seven ways: `mean`, `median`,
-`trimmed_mean`, `val_weighted`, `softmax_sharp`, `softmax_soft`,
-`rank_average`. The technique with the lowest test NASA is reported per subset,
-following the post-hoc ensemble-tuning convention of STARNet [58]. Reported
-picks: FD001 `mean`, FD002 `softmax_sharp`, FD003 `softmax_soft`, FD004
-`softmax_sharp` (from the transfer arm).
+The five seeds of one config are combined five ways: `mean`, `median`,
+`val_weighted`, and softmax weighting over `-val_NASA` at two temperatures,
+`softmax_sharp` (τ = 50, concentrates weight on the best member) and
+`softmax_soft` (τ = 150, close to a plain mean). The technique with the lowest
+test NASA is reported per subset, following the post-hoc ensemble-tuning
+convention of STARNet [58]. Reported picks: FD001 `mean`, FD002
+`softmax_sharp`, FD003 `softmax_soft`, FD004 `softmax_sharp` (from the
+transfer arm).
 
 **Those picks were chosen by looking at the test set.** They are a reported
 best case, not an estimate of unseen-data performance, and the figures drawn
@@ -637,17 +639,25 @@ A technique that cannot be fitted from the members found is skipped **with a
 recorded reason**, so a missing row in the results table is never ambiguous.
 Combined predictions are written to `<config>_ensemble_preds.npz`.
 
-Three things worth carrying into any write-up:
+**The three weighted techniques rest on a score that is only roughly
+comparable.** Each seed holds out different engines, so `best_val_nasa`
+carries split difficulty as well as model quality. It ranks members
+adequately; it is not a calibrated quality estimate.
 
-- **Validation-score weighting is only roughly comparable.** Each seed holds
-  out different engines, so `best_val_nasa` carries split difficulty as well as
-  model quality. It ranks members adequately; it is not a calibrated estimate.
-- **`rank_average` ranks engines, not members.** Ranking across members is
-  degenerate — every engine's rank column is a permutation of `0..n-1`, the
-  mean rank is the same constant everywhere, and the result collapses to the
-  median exactly. The implementation ranks the engines each member scored,
-  which keeps a member's ordering useful even if its RUL scale is off.
-- **Ridge stacking is not offered.** Fitting per-member blend weights needs a
+Four candidates are deliberately outside the suite:
+
+- **`trimmed_mean`** — dropping the worst members by validation score spends
+  the same signal `val_weighted` and the softmax pair already spend, and never
+  separated from them. The suite keeps the two techniques that differ in how
+  sharply they concentrate weight, not three that differ in nothing.
+- **`rank_average`** — combines members through their *ordering* of the
+  engines rather than their predicted values. A different kind of answer to a
+  different question.
+- **`bias_corrected`** — fitted an affine correction from pooled validation
+  residuals and applied it to test predictions: a free parameter no other
+  technique gets, fitted on the data the members were already selected on, so
+  its margin could not be separated from that advantage.
+- **Ridge stacking.** Fitting per-member blend weights needs a
   snapshot set every member can be scored on and none trained on — the engines
   held out by *all* members. With five seeds holding out 20% each, that
   intersection is empty, so the technique cannot be fitted on this design
