@@ -29,4 +29,4 @@ a second per engine, which is several minutes for a full FD002 file. Raise it
 to 100 to reproduce the published figures exactly.
 
 Code, weights, ablation study and full results:
-https://github.com/zainabraza06/TurboEngine_RLU_Prediction
+https://github.com/zainabraza06/Gauge_Net

@@ -34,7 +34,7 @@ Copy in what the Space needs — the serving code, the model package, the
 weights, and the bundles:
 
 ```bash
-REPO=/path/to/TurboEngine_RLU_Prediction
+REPO=/path/to/Gauge_Net
 
 cp -r $REPO/model  $REPO/ablation  $REPO/app  $REPO/checkpoints  .
 cp $REPO/deploy/space/space_app.py  $REPO/deploy/space/requirements.txt  .
