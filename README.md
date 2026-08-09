@@ -504,6 +504,11 @@ The MC-passes slider defaults to 100, which reproduces the reported numbers;
 lowering it is proportionally faster and slightly noisier. On CPU, 100 passes
 × 5 seeds is roughly a second per engine.
 
+**Hosting it.** See [deploy/](deploy/) — Hugging Face Spaces, with the files
+ready to copy. Vercel cannot host this app (≈911 MB of dependencies against a
+250 MB function limit, and Gradio needs a persistent queue), so `deploy/` also
+covers the split where Vercel serves the page and a Space serves the model.
+
 ## Layout
 
 ```
