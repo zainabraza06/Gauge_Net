@@ -15,7 +15,7 @@ import numpy as np
 import torch
 
 from .config import (DEVICE, SCALE, MC_PASSES_TEST, LAST_K, USE_MULTIWINDOW)
-from .igrfnet import build_model
+from .gaugenet import build_model
 from .metrics import nasa_score, ACC_THRESHOLDS, all_metrics
 from .windows import causal_current_window, build_val_snapshots, val_engines_for_seed
 

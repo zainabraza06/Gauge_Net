@@ -1,5 +1,5 @@
 """
-Shared configuration for the IGRFNet ablation study.
+Shared configuration for the GaugeNet ablation study.
 
 Every hyperparameter that the preprocessing, training and evaluation stages
 have to agree on lives here, so a change cannot be applied to one stage and

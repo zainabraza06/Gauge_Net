@@ -31,7 +31,7 @@ from model.config import (DEVICE, DATA_ROOT, OUT_ROOT, SCALE, LR, LR_MIN, WD, GR
                           EPOCHS, WARMUP_EP, BATCH, PATIENCE, MC_PASSES_VAL, DATASETS,
                           patience_for)
 from model.data import load_subset, features_for
-from model.igrfnet import build_model
+from model.gaugenet import build_model
 from model.inference import mc_predict, predict_test_set
 from model.losses import asym_huber
 from model.metrics import nasa_score, all_metrics, ACC_THRESHOLDS

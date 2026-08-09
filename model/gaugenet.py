@@ -1,5 +1,5 @@
 """
-IGRFNet -- the ablatable network.
+GaugeNet -- the ablatable network.
 
 Every optional component is a constructor flag, so a rung of the ablation
 ladder is a model that never builds the parts it is not testing. That keeps
@@ -34,7 +34,7 @@ from .modules import (SensorRelationshipBranch, CrossAttentionFusion, AttentionP
                       TemporalBlock)
 
 
-class IGRFNet(nn.Module):
+class GaugeNet(nn.Module):
 
     def __init__(self, n_f, fml, h_dim=H, use_sensor_branch=True, backbone='both',
                  far_attn_type='full'):
@@ -109,6 +109,6 @@ def build_model(n_features, fml, cfg, device=DEVICE):
     loading and the stacking pass cannot drift into building different
     architectures for the same config name.
     """
-    return IGRFNet(n_features, fml, h_dim=H,
-                   use_sensor_branch=cfg['use_sensor_branch'], backbone=cfg['backbone'],
-                   far_attn_type=cfg.get('far_attn_type', 'full')).to(device)
+    return GaugeNet(n_features, fml, h_dim=H,
+                    use_sensor_branch=cfg['use_sensor_branch'], backbone=cfg['backbone'],
+                    far_attn_type=cfg.get('far_attn_type', 'full')).to(device)

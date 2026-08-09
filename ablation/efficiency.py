@@ -40,7 +40,7 @@ BLUE, ORANGE, GREEN = '#4C72B0', '#DD8452', '#55A868'
 
 
 def profile(n_features=N_FEATURES, config=SETTLED_CONFIG, n_repeats=200, warmup=20):
-    from model.igrfnet import build_model
+    from model.gaugenet import build_model
     model = build_model(n_features, 100.0, config_by_name(config))
     model.eval()
     x = torch.randn(1, W, n_features, device=DEVICE)

@@ -1,1 +1,1 @@
-"""IGRFNet: geometry-informed RUL estimation on C-MAPSS."""
+"""GaugeNet: geometry-informed RUL estimation on C-MAPSS."""

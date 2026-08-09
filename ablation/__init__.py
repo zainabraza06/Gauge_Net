@@ -1,1 +1,1 @@
-"""Component-by-component ablation of IGRFNet."""
+"""Component-by-component ablation of GaugeNet."""

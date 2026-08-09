@@ -1,12 +1,12 @@
 """
-Building blocks of IGRFNet.
+Building blocks of GaugeNet.
 
 Each block corresponds to one rung of the ablation ladder, so a component can
 be switched off by not constructing it rather than by branching inside the
 forward pass.
 
 There is no spectral gate, no reverse-time backbone and no healthy-window
-contrast here -- see model.igrfnet for why each left.
+contrast here -- see model.gaugenet for why each left.
 
 On the spectral gate specifically: An FFT band-energy gate on the temporal
 features was ablated over 5 seeds on both subsets, in both its original and a
