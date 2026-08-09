@@ -15,13 +15,30 @@ venv/
 .ipynb_checkpoints/
 
 # Data and outputs -- both default locations for a local run.
-# The C-MAPSS archive is NASA's to distribute; checkpoints are too large to version.
+# The C-MAPSS archive is NASA's to distribute, and a fresh study run writes
+# checkpoints far faster than they are worth versioning.
 data/
 cmapps/
 cmapps_baseline/
 results/
 models/
 outputs/
+
+# The reported weights ARE versioned -- 58 MB across the two directories
+# below, every file under 10 MB, which GitHub carries without LFS. They are
+# what app/ serves, so a clone can run the demo without retraining.
+!progressive_ablation_all4_final/
+!transfer_learning_multi_pair/
+
+# ...except the geometry caches. Derived from the training split and
+# regenerable by `python -m ablation.train`, at 23 MB for nothing a clone
+# needs: the app reads its healthy reference from a bundle, not from these.
+progressive_ablation_all4_final/**/geom_cache.pkl
+
+# Deployment bundles are small and are the other half of a served model, so
+# they override the blanket *.pkl rule above.
+!app/bundles/
+!app/bundles/*.pkl
 
 # Logs and temp
 *.log
