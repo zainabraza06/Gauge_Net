@@ -467,10 +467,16 @@ that run.
 
 ## Demo app
 
+**Live demo:** deployed on Streamlit Community Cloud — see [deploy/](deploy/).
+
+Two front ends, both thin wrappers over the same `app/predict.py`, so they
+cannot drift into serving different numbers:
+
 ```bash
-pip install gradio
 python -m app.bundle FD001 FD002 FD003 FD004     # once, where the C-MAPSS data is
-python -m app.gradio_app
+
+streamlit run streamlit_app.py                   # the deployed front end
+python -m app.gradio_app                         # the same app, Gradio
 ```
 
 Upload a raw C-MAPSS trajectory file — `test_FD00X.txt`, or the same 26 columns
@@ -500,19 +506,31 @@ an upload cannot influence its own normalisation, and the geometry features
 are computed by the study's own functions rather than a serving-side
 reimplementation that could quietly drift from the reported numbers.
 
-The MC-passes slider defaults to 100, which reproduces the reported numbers;
-lowering it is proportionally faster and slightly noisier. On CPU, 100 passes
-× 5 seeds is roughly a second per engine.
+The MC-passes slider defaults to 100 locally, which reproduces the reported
+numbers; lowering it is proportionally faster and slightly noisier. On CPU, 100
+passes × 5 seeds is roughly a second per engine, so the hosted app defaults to
+25 and lets the slider reach 100.
 
-**Hosting it.** See [deploy/](deploy/) — Hugging Face Spaces, with the files
-ready to copy. Vercel cannot host this app (≈911 MB of dependencies against a
-250 MB function limit, and Gradio needs a persistent queue), so `deploy/` also
-covers the split where Vercel serves the page and a Space serves the model.
+**Verified against the study's own predictions.** Feeding the serving path a
+reconstructed FD001 test file reproduces the saved per-seed test predictions to
+a correlation of 0.9998–0.9999, a mean absolute difference of 0.37–0.67 cycles
+per seed, and **0.24 cycles on the ensemble** — the residual being MC dropout's
+own stochasticity. The app serves the reported model, not an approximation of
+it.
+
+**Hosting it.** See [deploy/](deploy/). Hugging Face Spaces was the natural
+home but now requires PRO for Gradio Spaces, so the live demo runs on Streamlit
+Community Cloud. Vercel cannot host this app at all (≈911 MB of dependencies
+against a 250 MB function limit, and a request-scoped model where Gradio needs
+a persistent queue); `deploy/` covers the split where Vercel serves the page
+and a Python host serves the model.
 
 ## Layout
 
 ```
 Gauge-Net.png      architecture diagram
+streamlit_app.py   deployed front end; Streamlit Cloud runs this file
+deploy/            hosting guides + a Hugging Face Space configuration
 
 checkpoints/       the reported weights, five seeds per subset
   FD001/ FD002/ FD003/    settled model, trained on that subset
@@ -521,7 +539,7 @@ checkpoints/       the reported weights, five seeds per subset
 app/               the demo
   bundle.py          python -m app.bundle FD001   (freeze train-fitted state)
   predict.py         CSV -> per-engine RUL, the reported ensemble per subset
-  gradio_app.py      python -m app.gradio_app
+  gradio_app.py      python -m app.gradio_app   (the same app, Gradio)
   bundles/           one small .pkl per subset, written by bundle.py
 
 preprocessing/     raw C-MAPSS text  ->  leak-free feature pickle
