@@ -36,14 +36,22 @@ weights, and the bundles:
 ```bash
 REPO=/path/to/Gauge_Net
 
-cp -r $REPO/model  $REPO/ablation  $REPO/app  $REPO/checkpoints  .
+cp -r $REPO/model  $REPO/ablation  $REPO/app  .
 cp $REPO/deploy/space/space_app.py  $REPO/deploy/space/requirements.txt  .
 cp $REPO/deploy/space/README.md     .          # overwrites the Space's stub
+
+# Weights only -- NOT geom_cache.pkl, which is a training artefact the serving
+# path never reads. It is 22 MB of the 80 MB in checkpoints/.
+for d in FD001 FD002 FD003 FD004; do
+  mkdir -p checkpoints/$d && cp $REPO/checkpoints/$d/*.pt checkpoints/$d/
+done
 ```
 
 `checkpoints/` and `app/bundles/` are both required. The weights alone cannot
 serve: the normalisation statistics, the healthy geometric reference and the
 fleet median life were fitted on the training split and live in the bundles.
+The geometry an upload is measured against is recomputed live from that stored
+reference, which is why the cache is not needed.
 
 Files over 10 MB need LFS, which none of these are — the largest is a 3 MB
 checkpoint — so a plain push works:
