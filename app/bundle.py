@@ -246,7 +246,14 @@ def build(subset, data_root=None, out_dir=BUNDLE_DIR):
         normalization=norm, ref_spd=ref_spd, was_ref=was_ref, fml=fml,
         ensemble=DEPLOY[subset]['ensemble'], val_nasa=val_nasa,
         val_nasa_source=val_source,
-        checkpoints={s: os.path.relpath(p, REPO_ROOT) for s, p in ckpts.items()})
+        # Forward slashes always. os.path.relpath emits the host separator, so
+        # a bundle built on Windows would carry 'checkpoints\FD002\...' -- and
+        # on Linux a backslash is an ordinary filename character, not a
+        # separator, so every checkpoint would be reported missing on the
+        # deployment target. A bundle is a portable artefact; it stores a
+        # portable path.
+        checkpoints={s: os.path.relpath(p, REPO_ROOT).replace(os.sep, '/')
+                     for s, p in ckpts.items()})
 
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, f'{subset}.pkl')

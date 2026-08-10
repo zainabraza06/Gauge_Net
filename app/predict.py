@@ -227,7 +227,10 @@ def predict_csv(path_or_buffer, subset, bundle_dir=BUNDLE_DIR, device=None,
 
     models = {}
     for seed, rel in bundle['checkpoints'].items():
-        path = os.path.join(REPO_ROOT, rel)
+        # Split on both separators before rejoining: current bundles store
+        # forward slashes, but one built by an older Windows run carries
+        # backslashes, and those would not resolve on a Linux host.
+        path = os.path.join(REPO_ROOT, *rel.replace('\\', '/').split('/'))
         if not os.path.exists(path):
             raise FileNotFoundError(f"Checkpoint listed in the bundle is missing: {path}")
         m = build_model(len(fn), fml, CONFIG, device=device)
